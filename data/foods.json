@@ -8,7 +8,7 @@
       "cal: 每100g千卡",
       "protein/carb/fat: 每100g克",
       "fiber: 每100g膳食纤维克",
-      "sugar: 每100g添加糖/糖克",
+      "sugar: 每100g糖（含天然糖与添加糖总量）克",
       "sodium: 每100g钠毫克",
       "serving: 常用一份量换算表"
     ]

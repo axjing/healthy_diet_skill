@@ -1,21 +1,30 @@
 # -*- coding: utf-8 -*-
 """健康评估与建议：根据单日摄入汇总和营养目标给出调优建议。"""
 import json
+import sys
 
 import app
 import goals
 
+# Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def evaluate_day(date_str, targets=None):
-    """输出健康评估：达标情况、问题项、针对性建议、健康评分(100制)。"""
-    if targets is None:
-        targets = goals.daily_targets("男", 70, 175, 30, "轻度", "维持")
+    """输出健康评估：达标情况、问题项、针对性建议、健康评分(100制)。
+    无档案目标(targets=None)时，仅给出基于摄入量/健康指标的通用建议，不臆造热量目标。"""
     data = app.analyze_day(date_str, targets)
     t = data["totals"]
     st = t.get("status", {})
     suggestions = []
     score = 100
     issues = []
+
+    if targets is None:
+        suggestions.append("尚未设置饮食目标档案，无法进行热量/营养素达标评估。"
+                           "可先执行 profile_init 记录性别、体重、身高、年龄、活动量与目标。")
+        score -= 0  # 不因缺档案而扣分，仅说明
 
     # 热量
     if st.get("cal_over"):
@@ -46,11 +55,12 @@ def evaluate_day(date_str, targets=None):
         suggestions.append("脂肪摄入偏高，减少油炸、重油烹饪和肥肉，多用蒸煮代替。")
         score -= 10
 
-    # 添加糖（每日 <25g，WHO 建议）
-    if t.get("sugar", 0) > 25:
-        issues.append("添加糖偏多")
-        suggestions.append("添加糖摄入超过25g/日建议上限，减少奶茶、甜饮料与甜点。")
-        score -= 10
+    # 糖（foods.json 中 sugar 为食物含糖总量，含天然糖与添加糖，非仅添加糖）
+    # WHO 建议游离糖（含添加糖）< 每日总热量10%（约 40-50g），此处用总量 50g 作偏低/偏高的粗参考
+    if t.get("sugar", 0) > 50:
+        issues.append("糖摄入偏多")
+        suggestions.append("糖摄入偏高，注意含糖饮料与甜食，水果虽含天然糖也不宜过量。")
+        score -= 5
 
     # 钠（每日 <2000mg 参考）
     if t.get("sodium", 0) > 2000:

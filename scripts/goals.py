@@ -4,6 +4,10 @@
 import json
 import sys
 
+# Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def bmr_mifflin(sex, weight_kg, height_cm, age):
     """Mifflin-St Jeor 基础代谢率 (kcal/day)。sex: '男'/'女'/'M'/'F'。"""
@@ -76,11 +80,6 @@ def daily_targets(sex, weight, height, age, activity="轻度", goal="维持"):
         "carb_g_target": round(carb_g),
         "fat_g_target": round(fat_g),
     }
-
-
-def to_calories(protein, carb, fat):
-    """宏量营养素换算热量：蛋白/碳水4kcal/g，脂肪9kcal/g。"""
-    return protein * 4 + carb * 4 + fat * 9
 
 
 def main():

@@ -7,11 +7,14 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FOODS_PATH = os.path.join(SKILL_DIR, "data", "foods.json")
 UNITS_PATH = os.path.join(SKILL_DIR, "data", "units.json")
+
+# Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 MACROS = ["cal", "protein", "carb", "fat", "fiber", "sugar", "sodium"]
 
@@ -96,26 +99,44 @@ def resolve_grams(amount, unit, food, units):
     # 尝试通用单位
     if unit in units:
         return units[unit] * amount
-    # 未知单位，回退到克
-    try:
-        return float(unit) if False else None
-    except Exception:
-        return None
+    # 识别到的计数单位（个/根/块/只/片/颗/粒等）若未在serving中给出，按食物平均单份重估算
+    if unit in _PIECE_UNITS:
+        serving = food.get("serving") or {}
+        if serving:
+            g = sum(list(serving.values())) / len(serving)
+            return g * amount
+        return amount * 100
+    # 未知且无法换算的单位
+    return None
+
+
+# 这些分类的食物已是成品/半成品（营养值已含烹饪油盐），不再应用烹饪系数
+_PREPARED_CATEGORIES = {"菜肴", "综合/快餐", "零食甜品", "饮品", "调味", "油脂"}
+
+# 计数类单位（单个/根/块…），食物 serving 未给出时按食物平均单份重估算
+_PIECE_UNITS = {"个", "颗", "粒", "根", "块", "只", "片", "条", "串", "朵", "段", "把", "个(大)", "个(小)", "根(小)"}
 
 
 def compute_item(description, foods, units, cooking, index=None):
     """计算单条饮食记录。description 形如 '2个鸡蛋(煎)' 或 '150克鸡胸肉'。"""
     index = index or build_index(foods)
     text = description.strip()
-    # 提取烹饪方式
-    cook = None
-    cm = re.search(r"[（(]([^）)]*)[）)]|(煎|炸|烤|蒸|煮|红烧|糖醋|清炒|爆炒|干煸|凉拌|油焖|白灼|烧烤|烟熏|麻辣|炖)", text)
-    if cm:
-        grp = cm.group(1) if cm.group(1) else cm.group(2)
-        cook = grp if grp in cooking else None
 
-    # 去掉烹饪注释后再去匹配食物
-    clean = re.sub(r"[（(][^）)]*[）)]", "", text)
+    # 从括号中提取真实的烹饪方式（如 '鸡胸肉(煎)'），仅当括号内容属于烹饪表时才算。
+    # 若括号内容是食物名的一部分（如 '麻辣烫(人均)'），则保留，用于匹配食物。
+    cook = None
+    paren = re.search(r"[（(]([^）)]*)[）)]", text)
+    if paren and paren.group(1) in cooking:
+        cook = paren.group(1)
+    else:
+        # 无括号烹饪标注时，从文本中识别烹饪词（如 '清炒西兰花'）。成品菜名（如 '红烧排骨'）
+        # 会在下方用 cook_word_in_name / prepared 守卫避免二次加成。
+        cm = re.search(r"(清蒸|白灼|红烧|糖醋|清炒|爆炒|干煸|油焖|烧烤|烟熏|油炸|麻辣|煎|炸|烤|蒸|煮|炖|凉拌)", text)
+        if cm and cm.group(1) in cooking:
+            cook = cm.group(1)
+
+    # 去掉烹饪标注括号后再匹配食物；仅剥离属于烹饪表的括号，保留食物名自带的括号（如 '(人均)'）
+    clean = re.sub(r"[（(](?:清蒸|白灼|红烧|糖醋|清炒|爆炒|干煸|油焖|烧烤|烟熏|油炸|麻辣|煎|炸|烤|蒸|煮|炖|凉拌)[）)]", "", text)
     # 解析数量
     amount, unit, food_query = parse_amount(clean)
     food, match = find_food(food_query, index)
@@ -126,8 +147,16 @@ def compute_item(description, foods, units, cooking, index=None):
     if grams is None:
         return {"ok": False, "error": f"无法换算单位: {unit}", "input": description}
 
-    # 烹饪修正
-    factor = cooking.get(cook, 1.0) if cook else 1.0
+    # 烹饪修正：仅对原始食材（主食/蛋类/奶类/肉禽/水产/豆类/蔬菜/水果/坚果）应用；
+    # 已是成品/半成品（菜肴/快餐/零食等），或烹饪词本就内嵌在食物名/别名里（如 '红烧排骨'、'烤红薯'）
+    # 时，不再二次加成，因为其营养值已含相应烹饪处理。
+    factor = 1.0
+    prepared = food.get("category") in _PREPARED_CATEGORIES
+    names = {food["name"]} | set(food.get("aliases") or [])
+    cook_word_in_name = bool(cook) and any(cook in n for n in names)
+    if cook and not prepared and not cook_word_in_name:
+        factor = cooking.get(cook, 1.0)
+
     w = grams / 100.0
     item = {
         "ok": True,
@@ -136,7 +165,7 @@ def compute_item(description, foods, units, cooking, index=None):
         "amount": amount,
         "unit": unit or "份",
         "grams": grams,
-        "cooking": cook,
+        "cooking": cook if factor != 1.0 else None,
         "cooking_factor": factor,
         "values": {m: round(info_per_100 * w * factor, 1) for m, info_per_100 in food.items() if m in MACROS},
     }

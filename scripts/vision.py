@@ -11,9 +11,11 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import sys
 
-from openai import OpenAI
+# 注意：openai 为可选依赖，在 analyze_image() 内延迟导入，
+# 确保未安装 openai 时其余命令（记录/统计/目标）不受影响。
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SETTINGS_PATH = os.path.join(SKILL_DIR, "data", "settings.json")
@@ -59,7 +61,8 @@ def load_vision_config():
     """读取 vision 配置；settings.json 不存在或损坏时返回 {}。"""
     if os.path.exists(SETTINGS_PATH):
         try:
-            data = json.load(open(SETTINGS_PATH, encoding="utf-8"))
+            with open(SETTINGS_PATH, encoding="utf-8") as f:
+                data = json.load(f)
             return data.get("vision", {})
         except (json.JSONDecodeError, OSError):
             return {}
@@ -67,20 +70,22 @@ def load_vision_config():
 
 
 def save_vision_config(provider, api_key, model=None):
-    """保存当前激活的视觉服务商配置到 settings.json，保留其余字段。"""
+    """保存当前激活的视觉服务商配置到 settings.json，保留其余字段。原子写入。"""
     data = {}
     if os.path.exists(SETTINGS_PATH):
         try:
-            data = json.load(open(SETTINGS_PATH, encoding="utf-8"))
+            with open(SETTINGS_PATH, encoding="utf-8") as f:
+                data = json.load(f)
         except (json.JSONDecodeError, OSError):
             data = {}
     cfg = {"provider": provider, "api_key": api_key}
     if model:
         cfg["model"] = model
     data["vision"] = cfg
-    os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
-    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+    tmp = f"{SETTINGS_PATH}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SETTINGS_PATH)
     return cfg
 
 
@@ -149,8 +154,52 @@ def chat(client, messages, model, timeout=60):
     return str(content).strip()
 
 
+def clean_vision_output(content):
+    """清洗 VLM 输出：剔除 Markdown 代码块、寒暄前缀与后置说明，确保返回纯净的逗号分隔食物描述。"""
+    s = str(content).strip()
+    # 剔除代码块标记
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    s = s.strip()
+
+    # 剔除整行前置提示语（如 "图中食物包含："、"识别结果如下：" 等）
+    lines = [line.strip() for line in s.splitlines() if line.strip()]
+    if lines and (lines[0].endswith(("：", ":")) or re.match(r"^.*?(包含|识别|食物|图片|结果).*?[：:]\s*$", lines[0])):
+        lines = lines[1:]
+    s = "\n".join(lines)
+
+    # 剔除行内常见寒暄/解释前缀
+    preamble_patterns = [
+        r"^.*?(识别结果|包含以下食物|图中包含|图中食物|识别到)[：:]\s*",
+        r"^(好的[，,！!]?|当然[，,！!]?|这是[，,！!]?|根据图片[，,！!]?|我识别出[，,！!]?|食物记录描述[：:]*)\s*",
+    ]
+    for pat in preamble_patterns:
+        s = re.sub(pat, "", s, flags=re.IGNORECASE).strip()
+
+    # 剔除末尾说明/客套话
+    postamble_patterns = [
+        r"[，,。\.\s]*(希望对你有帮助|请慢用|仅供参考|请注意营养搭配|祝您用餐愉快).*$",
+    ]
+    for pat in postamble_patterns:
+        s = re.sub(pat, "", s).strip()
+
+    # 去掉 markdown 加粗符号
+    s = s.replace("**", "").replace("*", "")
+
+    # 将换行符或分行列表规整为中文逗号，并安全去除列表序号/圆点（如 '1. ' 或 '- '），保留食物数量
+    items = []
+    for line in s.splitlines():
+        item = re.sub(r"^[-•*\s]*(\d+[\.、]\s*)?", "", line).strip()
+        if item:
+            items.append(item)
+    cleaned = "，".join(items)
+    return cleaned.strip("，, ")
+
+
 def analyze_image(image_path, provider=None, model=None, timeout=60):
     """识别图片中的食物，返回描述串。无配置或无图片均抛 ValueError。"""
+    from openai import OpenAI  # 延迟导入：仅图片识别需要 openai 库
+
     provider = provider or load_vision_config().get("provider")
     if not provider:
         raise ValueError("未配置视觉服务商，请先执行 `diet vision config <provider> <api_key>`")
@@ -165,8 +214,9 @@ def analyze_image(image_path, provider=None, model=None, timeout=60):
     )
     messages = build_messages(image_path)
     content = chat(client, messages, resolved_model, timeout)
+    cleaned = clean_vision_output(content)
 
-    if content.strip().rstrip("。").replace(" ", "") == "无法识别":
+    if not cleaned or cleaned.rstrip("。").replace(" ", "") == "无法识别":
         raise ValueError("模型未能识别出图片中的食物，请换一张更清晰的照片或改用文字描述")
 
-    return content
+    return cleaned

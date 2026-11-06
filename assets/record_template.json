@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agentskills.io/schema/meal-record-v1.json",
+  "date": "YYYY-MM-DD",
+  "meals": [
+    {
+      "ts": "YYYY-MM-DD HH:MM:SS",
+      "meal": "早餐 | 午餐 | 晚餐 | 加餐",
+      "text": "用户输入的食物描述",
+      "items": [],
+      "totals": {
+        "cal": 0.0,
+        "protein": 0.0,
+        "carb": 0.0,
+        "fat": 0.0,
+        "fiber": 0.0,
+        "sugar": 0.0,
+        "sodium": 0.0
+      }
+    }
+  ],
+  "exercise": [
+    {
+      "item": "运动项目名称",
+      "min": 0.0,
+      "cal": 0.0
+    }
+  ]
+}

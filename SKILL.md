@@ -1,20 +1,32 @@
 ---
 name: healthy-diet
-description: 饮食热量记录与营养分析技能。当用户用自然语言描述吃了什么、记录一日三餐、计算摄入热量与营养素、查询食物热量、设置减重/增肌/维持热量目标、查看每日/周/月饮食统计、导出饮食数据、拍照让 AI 识别并记录一餐、或询问"今天吃了多少卡/蛋白质够不够/目标完成情况"时使用。触发词：记录饮食、吃了什么、热量、卡路里、千卡、蛋白质、减脂、减重、增肌、营养目标、饮食统计、打卡、照片、图片、拍一张。\n 需要调用拍照识图能力时，参考脚本说明后使用 `diet analyze <图片>` 或 `diet add <日期> --image <图片>`。
+description: 饮食热量记录与营养分析技能。当用户用自然语言描述吃了什么、记录一日三餐、计算摄入热量与营养素、查询食物热量、根据身体指标设置减重/增肌/维持目标、查看每日或区间饮食统计、导出饮食数据、拍照识别食物记录、或询问“今天吃了多少卡/蛋白质够不够/热量超标了吗”时使用。支持自动解析数量、口语单位、烹饪方式、复合菜名消歧与否定排除。
+license: MIT
+compatibility: Python 3.10+, 可选第三方依赖 openai (仅多模态图片识别需要)
+metadata:
+  version: "1.1.0"
+  specification: "agentskills.io"
+  category: "lifestyle-and-health"
 ---
 
 # 饮食热量记录技能 (Healthy Diet)
 
-把用户的自然语言饮食描述解析为结构化食物记录，核算热量与营养素，
-存入**按日期分文件的本地 JSON 数据**，并提供目标管理、统计分析、健康评估与数据导出。
+将用户的自然语言饮食描述解析为结构化食物记录，核算热量与营养素，存入**按日期分文件的本地 JSON 数据**，并提供代谢目标管理、统计分析、健康评估与数据导出。遵循 [Agent Skills 规范](https://agentskills.io)。
+
+## 渐进式参考文档 (Progressive References)
+
+为保持本指令上下文精简，深度理论与模式定义独立存放于 `references/`，按需查阅：
+- [营养与代谢生理学参考](file:///D:/CODE/healthy_diet_skill/references/nutrition_science.md)：Mifflin-St Jeor 公式、性别最低生理安全底线、g/kg 蛋白质定额、烹饪修正系数表与 WHO 指南。
+- [数据结构与持久化规范](file:///D:/CODE/healthy_diet_skill/references/schema.md)：每日记录 `records/`、用户档案 `settings.json` 与自定义食物 `custom_foods.json` 的 JSON Schema。
+- [记录模板定义](file:///D:/CODE/healthy_diet_skill/assets/record_template.json)：标准饮食记录基础模板。
 
 ## 数据存放
 
-- 技能数据目录：即本技能所在目录下的 `data/`（如 `~/.agents/skills/healthy-diet/data/` 或本仓库根目录 `data/`）
+- 技能数据目录：即本技能所在目录下的 `data/`
 - 每日常规记录：`data/records/<YYYY-MM-DD>.json`（含 `meals` 餐次列表 + `exercise` 运动消耗）
 - 用户自定义食物：`data/custom_foods.json`
-- 用户档案/目标：`data/settings.json`（vision 图片识别服务商配置也存于此文件 `vision` 段）
-- 内置食物库：`data/foods.json`（约150种常见食物，每100g可食部营养）
+- 用户档案/目标：`data/settings.json`（vision 视觉服务商配置亦存于此文件）
+- 内置食物库：`data/foods.json`（约140种常见食物，每100g可食部营养）
 - 单位/烹饪换算表：`data/units.json`
 
 ## 快速开始
@@ -93,9 +105,14 @@ python scripts/suggest.py 2026-09-07
 
 - 分隔符：逗号(,)，中文逗号(，)、分号、顿号、换行。
 - 数字+单位+食物名："2个鸡蛋" → 鸡蛋×2×50g；"150克鸡胸肉" → 150g。
-- 无数字默认1；无单位按该食物常见一份量。
+- 数量后置同样支持："米饭150克"、"鸡蛋2个"。
+- 中文数字："二两米饭"、"半碗粥"、"二十个饺子"均可解析（紧邻单位时才转换，避免误伤"四季豆"类食物名）。
+- 无数字默认1；无单位按该食物常见一份量（优先计数单位 个/块/片，其次 份/碗/杯）。
+- 数量为 0 或负数会被拒绝。
+- 语义否定过滤：自动识别“不要米饭”、“不吃辣”等排除描述，避免误记热量。
+- 未识别项警示：无法识别的食物会通过 `warnings` 与 `unrecognized` 明确反馈，避免静默漏算热量。
 - 烹饪方式写在括号里或紧邻：`鸡胸肉(煎)`、`红烧肉`、`炸鸡` 均识别。
-- 多义词：食物库支持"一碗面条/牛肉面"这类复合名——优先精确匹配整名。
+- 多义词与复合菜肴：支持“西红柿炒鸡蛋”、“牛肉面”这类复合名与智能别名匹配——优先匹配完整菜肴。
 
 ## 输出规范
 

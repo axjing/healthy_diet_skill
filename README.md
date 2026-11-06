@@ -1,6 +1,10 @@
 # Healthy Diet - 饮食热量记录与营养分析
 
-把自然语言饮食描述解析为结构化记录，自动核算热量与营养素，存入按日期分文件的本地 JSON 数据，并提供目标管理、统计分析、健康评估与数据导出。
+[![Agent Skills Standard](https://img.shields.io/badge/Agent_Skills-agentskills.io-blue)](https://agentskills.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests: 25 Passed](https://img.shields.io/badge/Tests-25%20Passed-brightgreen)](tests/)
+
+把自然语言饮食描述解析为结构化记录，自动核算热量与营养素，存入按日期分文件的本地 JSON 数据，并提供目标管理、统计分析、健康评估与数据导出。本技能遵循 [agentskills.io](https://agentskills.io) 开放标准构建。
 
 ## 功能概览
 
@@ -93,7 +97,9 @@ python scripts/app.py eval "150克鸡胸肉(煎),1碗米饭"
 - `2个鸡蛋` → 数量 2 × 单位 个（50g/个）
 - `150克鸡胸肉(煎)` → 150g，烹饪系数 1.35
 - `清炒西兰花` → 自动识别"清炒"烹饪方式
-- 无数字默认 1，无单位按食物库中常见一份量
+- 无数字默认 1，无单位按食物库中常见一份量（优先计数单位 个/块/片，其次 份/碗/杯）
+- 数量后置同样支持：`米饭150克`、`鸡蛋2个`
+- 中文数字：`二两米饭`、`半碗粥`、`二十个饺子`；数量为 0 或负数会被拒绝
 
 ### 餐次管理
 
@@ -219,7 +225,7 @@ data/
 |---------|------|---------|
 | 蒸/煮/炖/凉拌/白灼/清蒸/水煮 | 1.0 | 无额外油脂，基准值 |
 | 清炒 | 1.1 | 少量油 |
-| 爆炒/烧烤/烤/烟熏/火锅 | 1.2 | 中等油脂 |
+| 炒/爆炒/烧烤/烤/烟熏/火锅 | 1.2 | 中等油脂（裸"炒"如"西红柿炒蛋"） |
 | 红烧/干煎/油焖/糖醋/麻辣 | 1.35–1.4 | 较多油脂 |
 | 干煸 | 1.5 | 高油脂 |
 | 油炸/炸 | 1.7 | 油炸食品 |
@@ -245,22 +251,42 @@ data/
 - **图片识别（可选）**需安装 `pip install openai`
 - Windows 下建议设置 `PYTHONIOENCODING=utf-8` 或脚本已内置 UTF-8 输出修复
 
-## 项目结构
+## 项目结构 (遵循 agentskills.io 规范)
 
 ```
-healthy_diet_skill/
-├── SKILL.md            # 技能元数据与详细设计文档
-├── README.md           # 本文件
-├── .gitignore
-├── scripts/
+healthy-diet/
+├── SKILL.md            # Required: Agent 技能元数据 (YAML Frontmatter) 与执行指导
+├── README.md           # 人类开发者项目说明与快速指南
+├── LICENSE             # MIT 开源许可证
+├── .gitignore          # 忽略用户运行时记录与本地配置
+├── scripts/            # 可执行确定性工具代码
 │   ├── app.py          # CLI 主入口，命令调度，数据 CRUD
 │   ├── calc.py         # 核心解析引擎：自然语言 → 结构化食物记录
 │   ├── goals.py        # BMR/TDEE 计算（Mifflin-St Jeor），宏量目标
 │   ├── suggest.py      # 健康评估：评分 + 问题诊断 + 针对性建议
 │   └── vision.py       # 多模态图片识别（可选）：QwenVL/GLM-4V/GPT-4o
-└── data/
+├── references/         # 渐进式披露参考文档 (Progressive Disclosure)
+│   ├── nutrition_science.md # 代谢生理学、蛋白质定额、烹饪修正系数表
+│   └── schema.md       # JSON 数据结构规范与字段定义
+├── assets/             # 静态模板与资源
+│   └── record_template.json # 饮食记录数据模板
+├── tests/              # 自动化测试套件 (pytest / unittest)
+│   ├── test_calc.py    # 自然语言解析、复合菜品、未识别项测试
+│   ├── test_goals.py   # BMR/TDEE、代谢底线与蛋白质定额测试
+│   ├── test_suggest.py # 健康评估与扣分诊断测试
+│   ├── test_vision.py  # 多模态输出清洗测试
+│   └── test_app.py     # 数据持久化与 CLI 逻辑集成测试
+└── data/               # 运行时基础营养库与数据存储
     ├── foods.json      # 内置食物营养数据库
     └── units.json      # 单位换算表 + 烹饪修正系数
+```
+
+## 测试运行
+
+```bash
+pytest -v
+# 或使用标准库：
+python -m unittest discover tests -v
 ```
 
 ## 设计决策

@@ -2,6 +2,7 @@
 """健康评估与建议：根据单日摄入汇总和营养目标给出调优建议。"""
 import json
 import sys
+from datetime import datetime
 
 import app
 import goals
@@ -24,7 +25,6 @@ def evaluate_day(date_str, targets=None):
     if targets is None:
         suggestions.append("尚未设置饮食目标档案，无法进行热量/营养素达标评估。"
                            "可先执行 profile_init 记录性别、体重、身高、年龄、活动量与目标。")
-        score -= 0  # 不因缺档案而扣分，仅说明
 
     # 热量
     if st.get("cal_over"):
@@ -34,6 +34,11 @@ def evaluate_day(date_str, targets=None):
     elif st.get("cal_under"):
         issues.append("热量摄入不足")
         suggestions.append("今日热量不足，建议补充优质蛋白和复合碳水，如鸡胸肉、全麦面包、牛奶。")
+        score -= 10
+
+    if targets and "safety_floor" in targets and t.get("cal", 0) < targets["safety_floor"]:
+        issues.append("低于生理安全热量底线")
+        suggestions.append(f"今日热量摄入低于生理安全底线 ({targets['safety_floor']} kcal)，长期过低易引起代谢适应与肌肉流失，建议温和制造缺口。")
         score -= 10
 
     # 蛋白质
@@ -55,11 +60,11 @@ def evaluate_day(date_str, targets=None):
         suggestions.append("脂肪摄入偏高，减少油炸、重油烹饪和肥肉，多用蒸煮代替。")
         score -= 10
 
-    # 糖（foods.json 中 sugar 为食物含糖总量，含天然糖与添加糖，非仅添加糖）
-    # WHO 建议游离糖（含添加糖）< 每日总热量10%（约 40-50g），此处用总量 50g 作偏低/偏高的粗参考
+    # 糖（注：当前库内记录为食物总糖量，含水果果糖与奶类乳糖等天然糖）
+    # WHO 建议游离糖（添加糖）< 每日总热量10%（约 40-50g）
     if t.get("sugar", 0) > 50:
         issues.append("糖摄入偏多")
-        suggestions.append("糖摄入偏高，注意含糖饮料与甜食，水果虽含天然糖也不宜过量。")
+        suggestions.append("今日统计总糖偏多（含天然糖分）。若主要来自整果与纯奶可放宽关注，但需重点留意含糖饮料、奶茶与加工甜点中的游离糖。")
         score -= 5
 
     # 钠（每日 <2000mg 参考）
@@ -70,6 +75,7 @@ def evaluate_day(date_str, targets=None):
 
     # 膳食纤维（每日 25-30g 参考）
     if t.get("fiber", 0) < 15:
+        issues.append("膳食纤维不足")
         suggestions.append("膳食纤维不足，可补充燕麦、豆类、绿叶菜与水果。")
         score -= 5
 
@@ -90,12 +96,15 @@ def evaluate_day(date_str, targets=None):
 
 
 def main():
-    import sys
-    date_str = sys.argv[1] if len(sys.argv) > 1 else "2026-09-07"
+    date_str = sys.argv[1] if len(sys.argv) > 1 else datetime.now().strftime("%Y-%m-%d")
     profile = app.load_settings().get("profile")
     targets = goals.daily_targets(*profile) if profile else None
     print(json.dumps(evaluate_day(date_str, targets), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, RuntimeError) as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+        sys.exit(2)

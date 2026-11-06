@@ -24,16 +24,34 @@ SETTINGS_PATH = os.path.join(SKILL_DIR, "data", "settings.json")
 MACROS = ["cal", "protein", "carb", "fat", "fiber", "sugar", "sodium"]
 
 
+def emit(result):
+    """打印结果 JSON；若结果包含 error 字段则以非零退出码退出，便于脚本/agent 感知失败。"""
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if isinstance(result, dict) and "error" in result:
+        sys.exit(2)
+
+
+def atomic_write_json(path, data):
+    """原子写入 JSON：先写临时文件再 os.replace，避免写一半崩溃或并发写坏数据。"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
 def ensure_dirs():
     os.makedirs(RECORDS_DIR, exist_ok=True)
 
 
 def load_foods():
-    cfg = json.load(open(calc.FOODS_PATH, encoding="utf-8"))
+    with open(calc.FOODS_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
     foods = cfg["foods"]
     custom = []
     if os.path.exists(CUSTOM_FOODS_PATH):
-        custom = json.load(open(CUSTOM_FOODS_PATH, encoding="utf-8")).get("foods", [])
+        with open(CUSTOM_FOODS_PATH, encoding="utf-8") as f:
+            custom = json.load(f).get("foods", [])
     return foods + custom, cfg["foods"], custom
 
 
@@ -42,28 +60,39 @@ def file_path_for(d):
 
 
 def validate_date(date_str):
-    """校验日期格式为 YYYY-MM-DD，非法则抛出 ValueError。"""
-    datetime.strptime(str(date_str), "%Y-%m-%d")
-    return str(date_str)
+    """校验并归一化日期为 YYYY-MM-DD（如 2026-9-7 -> 2026-09-07），非法则抛出 ValueError。
+    归一化确保记录文件名与 range/export 按日期对象读取时一致，避免数据碎片。"""
+    return datetime.strptime(str(date_str), "%Y-%m-%d").strftime("%Y-%m-%d")
 
 
 def read_day(d):
     p = file_path_for(str(d))
     if os.path.exists(p):
-        return json.load(open(p, encoding="utf-8"))
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
     return {"date": str(d), "meals": [], "exercise": []}
 
 
 def write_day(d, data):
-    ensure_dirs()
-    with open(file_path_for(str(d)), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(file_path_for(str(d)), data)
+
+
+def normalize_ts(ts):
+    """校验并归一化补记时间为 YYYY-MM-DD HH:MM:SS；非法抛 ValueError。"""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+        try:
+            return datetime.strptime(ts, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        raise ValueError(f"时间格式应为 YYYY-MM-DD HH:MM[:SS]，收到: {ts}")
 
 
 def meal_classify_hour_str(ts):
     try:
-        dt = datetime.fromisoformat(ts) if "T" in ts else datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-        return calc.meal_classify(dt.hour)
+        return calc.meal_classify(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").hour)
     except Exception:
         return "加餐"
 
@@ -83,6 +112,7 @@ def add_meal(date_str, description, ts=None, meal_override=None):
     if meal_override and meal_override not in VALID_MEALS:
         return {"error": f"餐次非法，可选值：{','.join(sorted(VALID_MEALS))}", "given": meal_override}
     ts = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = normalize_ts(ts)
     meal_name = meal_override or meal_classify_hour_str(ts)
     day = read_day(date_str)
     day["meals"].append({
@@ -93,14 +123,30 @@ def add_meal(date_str, description, ts=None, meal_override=None):
         "totals": res["totals"],
     })
     write_day(date_str, day)
-    return {"ok": True, "meal": meal_name, "totals": res["totals"]}
+    warnings = []
+    if ts[:10] != date_str:
+        warnings.append(f"--ts 日期({ts[:10]})与记录日期({date_str})不一致，已按 {date_str} 入库")
+    if res.get("unrecognized"):
+        for u in res["unrecognized"]:
+            warnings.append(f"未识别项: {u.get('input')} ({u.get('error')})")
+    if res.get("excluded"):
+        for ex in res["excluded"]:
+            warnings.append(f"排除项: {ex.get('input')}")
+
+    result = {"ok": True, "meal": meal_name, "totals": res["totals"], "items": res["items"]}
+    if warnings:
+        result["warnings"] = warnings
+    if res.get("unrecognized"):
+        result["unrecognized"] = res["unrecognized"]
+    return result
 
 
 def day_totals(day):
     t = {m: 0.0 for m in MACROS}
     for meal in day.get("meals", []):
+        totals = meal.get("totals") or {}  # 防御手改/旧版数据缺 totals 字段
         for m in MACROS:
-            t[m] += meal["totals"].get(m, 0)
+            t[m] += totals.get(m, 0)
     return {m: round(v, 1) for m, v in t.items()}
 
 
@@ -145,7 +191,7 @@ def edit_meal(date_str, index, description=None, meal_override=None):
         if meal_override not in VALID_MEALS:
             return {"error": f"餐次非法，可选值：{','.join(sorted(VALID_MEALS))}", "given": meal_override}
         meal["meal"] = meal_override
-    if description:
+    if description is not None:
         food, _, c = load_foods()
         _, units, cooking = calc.load_data()
         res = calc.parse_meal(description, food, units, cooking, calc.build_index(food))
@@ -161,6 +207,10 @@ def edit_meal(date_str, index, description=None, meal_override=None):
 
 def add_exercise(date_str, item, duration_min, cal):
     date_str = validate_date(date_str)
+    if duration_min is None or duration_min <= 0:
+        raise ValueError(f"运动时长(分钟)应大于0，收到: {duration_min}")
+    if cal is None or cal < 0:
+        raise ValueError(f"消耗热量不能为负，收到: {cal}")
     day = read_day(date_str)
     day.setdefault("exercise", []).append({"item": item, "min": duration_min, "cal": cal})
     write_day(date_str, day)
@@ -171,21 +221,39 @@ def range_stats(start, end):
     """区间汇总：逐日 + 总计 + 平均值（含运动消耗与净摄入）。"""
     rows = []
     cur = start
+    days_count = (end - start).days + 1
+    meal_days = 0
+    exercise_days = 0
     while cur <= end:
         day = read_day(cur)
         t = day_totals(day)
         exercise = sum(e.get("cal", 0) for e in day.get("exercise", []))
         t["exercise_cal"] = round(exercise, 1)
         t["net_cal"] = round(t["cal"] - exercise, 1)
+        if t["cal"] > 0:
+            meal_days += 1
+        if exercise > 0:
+            exercise_days += 1
         rows.append({"date": str(cur), **t})
         cur += timedelta(days=1)
     total = {m: round(sum(r.get(m, 0) for r in rows), 1) for m in MACROS}
     total["exercise_cal"] = round(sum(r.get("exercise_cal", 0) for r in rows), 1)
-    n = max(len([r for r in rows if r["cal"] > 0]), 1)
+    total["net_cal"] = round(total["cal"] - total["exercise_cal"], 1)
+
+    # 有记录饮食日的摄入结构平均值
+    n = max(meal_days, 1)
     avg = {m: round(total[m] / n, 1) for m in MACROS}
-    avg["exercise_cal"] = round(total["exercise_cal"] / n, 1)
-    avg["net_cal"] = round(total["cal"] / n - total["exercise_cal"] / n, 1)
-    return {"start": str(start), "end": str(end), "rows": rows, "total": total, "avg": avg}
+    # 运动日均消耗（按实际运动天数核算；若无运动则为0）
+    avg["exercise_cal"] = round(total["exercise_cal"] / max(exercise_days, 1), 1) if exercise_days > 0 else 0.0
+    # 区间自然日日均净摄入
+    avg["net_cal"] = round(total["net_cal"] / max(days_count, 1), 1)
+
+    meta = {
+        "days_in_range": days_count,
+        "days_with_meals": meal_days,
+        "days_with_exercise": exercise_days,
+    }
+    return {"start": str(start), "end": str(end), "meta": meta, "rows": rows, "total": total, "avg": avg}
 
 
 def to_csv(rows, path):
@@ -205,37 +273,41 @@ def to_json_export(rows, path):
 
 
 def custom_food_add(name, cal, protein=0, carb=0, fat=0, fiber=0, sugar=0, sodium=0, serving=None):
-    current = json.load(open(CUSTOM_FOODS_PATH, encoding="utf-8")) if os.path.exists(CUSTOM_FOODS_PATH) else {"foods": []}
+    current = {"foods": []}
+    if os.path.exists(CUSTOM_FOODS_PATH):
+        with open(CUSTOM_FOODS_PATH, encoding="utf-8") as f:
+            current = json.load(f)
     entry = {"name": name, "aliases": [], "category": "自定义", "cal": cal, "protein": protein,
              "carb": carb, "fat": fat, "fiber": fiber, "sugar": sugar, "sodium": sodium,
              "serving": serving or {}}
-    current["foods"] = [f for f in current["foods"] if f["name"] != name]
+    current["foods"] = [f for f in current.get("foods", []) if f["name"] != name]
     current["foods"].append(entry)
-    with open(CUSTOM_FOODS_PATH, "w", encoding="utf-8") as f:
-        json.dump(current, f, ensure_ascii=False, indent=2)
+    atomic_write_json(CUSTOM_FOODS_PATH, current)
     return entry
 
 
 def load_settings():
     if os.path.exists(SETTINGS_PATH):
-        return json.load(open(SETTINGS_PATH, encoding="utf-8"))
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            return json.load(f)
     return {}
 
 
 def save_settings(s):
-    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-        json.dump(s, f, ensure_ascii=False, indent=2)
+    atomic_write_json(SETTINGS_PATH, s)
     return s
 
 
 def profile_init(sex, weight, height, age, activity, goal):
-    """保存用户档案，用于目标计算。返回 daily_targets 结果。"""
+    """保存用户档案，用于目标计算。返回 daily_targets 结果。
+    先校验（活动量/目标/数值范围），失败时不写入档案。"""
     profile = [sex, float(weight), float(height), int(age),
                goals.resolve_activity_name(activity), goal]
+    targets = goals.daily_targets(*profile)
     s = load_settings()
     s["profile"] = profile
     save_settings(s)
-    return goals.daily_targets(*profile)
+    return targets
 
 
 def profile_targets():
@@ -255,6 +327,7 @@ def main():
     p.add_argument("text", nargs="?")
     p.add_argument("--image")
     p.add_argument("--provider")
+    p.add_argument("--model")
     p.add_argument("--meal")
     p.add_argument("--ts", default=None)
 
@@ -299,6 +372,7 @@ def main():
     p.add_argument("--protein", type=float, default=0)
     p.add_argument("--carb", type=float, default=0)
     p.add_argument("--fat", type=float, default=0)
+    p.add_argument("--fiber", type=float, default=0)
     p.add_argument("--sugar", type=float, default=0)
     p.add_argument("--sodium", type=float, default=0)
 
@@ -331,54 +405,73 @@ def main():
         description = args.text
         vision_desc = None
         if args.image:
-            vision_desc = vision.analyze_image(args.image, provider=args.provider)
+            vision_desc = vision.analyze_image(args.image, provider=args.provider, model=args.model)
             description = f"{args.text}，{vision_desc}" if args.text else vision_desc
         if not description:
-            print(json.dumps({"error": "缺少食物描述或 --image 图片"}, ensure_ascii=False, indent=2))
-            sys.exit(2)
+            emit({"error": "缺少食物描述或 --image 图片"})
         else:
             res = add_meal(args.date, description, args.ts, args.meal)
             if vision_desc:
                 res = {"vision": vision_desc, **res}
-            print(json.dumps(res, ensure_ascii=False, indent=2))
+            emit(res)
     elif args.cmd == "delete":
-        print(json.dumps(delete_meal(args.date, args.index), ensure_ascii=False, indent=2))
+        emit(delete_meal(args.date, args.index))
     elif args.cmd == "edit":
-        print(json.dumps(edit_meal(args.date, args.index, args.text, args.meal), ensure_ascii=False, indent=2))
+        if args.text is None and not args.meal:
+            emit({"error": "请提供 --text 新描述或 --meal 新餐次"})
+        else:
+            emit(edit_meal(args.date, args.index, args.text, args.meal))
     elif args.cmd == "day":
         targets = profile_targets() if args.targets else None
         print(json.dumps(analyze_day(args.date, targets), ensure_ascii=False, indent=2))
     elif args.cmd == "range":
         s = datetime.strptime(validate_date(args.start), "%Y-%m-%d").date()
         e = datetime.strptime(validate_date(args.end), "%Y-%m-%d").date()
-        print(json.dumps(range_stats(s, e), ensure_ascii=False, indent=2))
+        if s > e:
+            emit({"error": f"开始日期晚于结束日期: {args.start} > {args.end}"})
+        elif (e - s).days > 731:
+            emit({"error": "日期区间过长（最多 731 天），请缩小范围"})
+        else:
+            print(json.dumps(range_stats(s, e), ensure_ascii=False, indent=2))
     elif args.cmd == "export":
         s = datetime.strptime(validate_date(args.start), "%Y-%m-%d").date()
         e = datetime.strptime(validate_date(args.end), "%Y-%m-%d").date()
-        rows = range_stats(s, e)["rows"]
-        p = to_csv(rows, args.out) if args.format == "csv" else to_json_export(rows, args.out)
-        print(json.dumps({"exported": p, "rows": len(rows)}, ensure_ascii=False))
+        if s > e:
+            emit({"error": f"开始日期晚于结束日期: {args.start} > {args.end}"})
+        elif (e - s).days > 731:
+            emit({"error": "日期区间过长（最多 731 天），请缩小范围"})
+        else:
+            rows = range_stats(s, e)["rows"]
+            p = to_csv(rows, args.out) if args.format == "csv" else to_json_export(rows, args.out)
+            print(json.dumps({"exported": p, "rows": len(rows)}, ensure_ascii=False))
     elif args.cmd == "profile_init":
-        print(json.dumps(profile_init(args.sex, args.weight, args.height, args.age, args.activity, args.goal), ensure_ascii=False, indent=2))
+        emit(profile_init(args.sex, args.weight, args.height, args.age, args.activity, args.goal))
     elif args.cmd == "goals":
         a = list(args.args)
         if len(a) < 4:
-            print(json.dumps({"error": "goals 需要至少 4 个参数：性别 体重 身高 年龄 [活动量 目标]",
-                              "given": len(a)}, ensure_ascii=False, indent=2))
+            emit({"error": "goals 需要至少 4 个参数：性别 体重 身高 年龄 [活动量 目标]",
+                  "given": len(a)})
         else:
-            for i in (1, 2):
-                a[i] = float(a[i])
-            a[3] = int(a[3])
-            print(json.dumps(goals.daily_targets(*a), ensure_ascii=False, indent=2))
+            try:
+                a[1], a[2] = float(a[1]), float(a[2])
+                a[3] = int(a[3])
+            except ValueError:
+                emit({"error": f"体重/身高/年龄需为数字，收到: {args.args}"})
+            else:
+                emit(goals.daily_targets(*a))
     elif args.cmd == "custom":
-        print(json.dumps(custom_food_add(args.name, args.cal, args.protein, args.carb, args.fat,
-                                         sugar=args.sugar, sodium=args.sodium), ensure_ascii=False, indent=2))
+        emit(custom_food_add(args.name, args.cal, args.protein, args.carb, args.fat,
+                             fiber=args.fiber, sugar=args.sugar, sodium=args.sodium))
     elif args.cmd == "exercise":
-        print(json.dumps(add_exercise(args.date, args.item, args.min, args.cal), ensure_ascii=False))
+        emit(add_exercise(args.date, args.item, args.min, args.cal))
     elif args.cmd == "eval":
         foods, base, custom = load_foods()
         _, units, cooking = calc.load_data()
-        print(json.dumps(calc.parse_meal(args.text, foods, units, cooking, calc.build_index(foods)), ensure_ascii=False, indent=2))
+        parsed = calc.parse_meal(args.text, foods, units, cooking, calc.build_index(foods))
+        if not parsed["items"]:
+            emit({"error": "未能解析任何食物", **parsed})
+        else:
+            print(json.dumps(parsed, ensure_ascii=False, indent=2))
     elif args.cmd == "analyze":
         if args.dry_run:
             provider = args.provider or vision.load_vision_config().get("provider", "qwen")
@@ -397,7 +490,10 @@ def main():
             foods, _, _ = load_foods()
             _, units, cooking = calc.load_data()
             parsed = calc.parse_meal(desc, foods, units, cooking, calc.build_index(foods))
-            print(json.dumps({"description": desc, "parsed": parsed}, ensure_ascii=False, indent=2))
+            if not parsed["items"]:
+                emit({"error": f"识别结果未能解析出食物: {desc}", "description": desc, "parsed": parsed})
+            else:
+                print(json.dumps({"description": desc, "parsed": parsed}, ensure_ascii=False, indent=2))
     elif args.cmd == "vision":
         if args.vision_cmd == "list":
             cfg = vision.load_vision_config()
@@ -423,7 +519,8 @@ if __name__ == "__main__":
     try:
         main()
     except ImportError as exc:
-        print(json.dumps({"error": f"缺少依赖库: {exc}。请先执行 pip install openai"}, ensure_ascii=False, indent=2))
+        # 延迟导入后，ImportError 只可能来自图片识别所需的 openai 库
+        print(json.dumps({"error": f"图片识别需要 openai 库: {exc}。请执行 pip install openai（其余命令不受影响）"}, ensure_ascii=False, indent=2))
         sys.exit(2)
     except (ValueError, RuntimeError) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))

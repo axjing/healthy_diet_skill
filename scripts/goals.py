@@ -11,7 +11,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def bmr_mifflin(sex, weight_kg, height_cm, age):
     """Mifflin-St Jeor 基础代谢率 (kcal/day)。sex: '男'/'女'/'M'/'F'。"""
-    male = sex in ("男", "M", "m", "男性")
+    s = str(sex).strip().lower()
+    male = s in ("男", "男性", "m", "male")
+    female = s in ("女", "女性", "f", "female")
+    if not male and not female:
+        raise ValueError(f"性别应为 男/女（或 M/F），收到: {sex}")
     base = 10 * weight_kg + 6.25 * height_cm - 5 * age
     return base + 5 if male else base - 161
 
@@ -43,7 +47,11 @@ GOAL_FACTOR = {
 
 def resolve_activity(name):
     name = str(name).strip()
-    return ACTIVITY.get(_ACTIVITY_ALIAS.get(name, name), 1.375)
+    key = _ACTIVITY_ALIAS.get(name, name)
+    if key not in ACTIVITY:
+        raise ValueError(f"未知活动量: {name}，可选：久坐/轻度/中度/重度/极高"
+                         "（别名：不运动/每周运动1-3次/每周运动3-5次/每周运动6-7次/每天剧烈运动）")
+    return ACTIVITY[key]
 
 
 def resolve_activity_name(name):
@@ -53,11 +61,22 @@ def resolve_activity_name(name):
 
 def daily_targets(sex, weight, height, age, activity="轻度", goal="维持"):
     """返回每日目标：热量、宏量营养素（克 + 供能比）、BMR、TDEE。"""
-    bmr = bmr_mifflin(sex, weight, height, age)
+    if goal not in GOAL_FACTOR:
+        raise ValueError(f"未知目标: {goal}，可选：{'/'.join(GOAL_FACTOR)}")
+    if not (20 <= float(weight) <= 300):
+        raise ValueError(f"体重应在 20-300 kg 之间，收到: {weight}")
+    if not (50 <= float(height) <= 260):
+        raise ValueError(f"身高应在 50-260 cm 之间，收到: {height}")
+    if not (1 <= int(age) <= 120):
+        raise ValueError(f"年龄应在 1-120 岁之间，收到: {age}")
+    bmr = bmr_mifflin(sex, float(weight), float(height), int(age))
     tdee = bmr * resolve_activity(activity)
     adjust = GOAL_FACTOR.get(goal, 0)
     cal = tdee + adjust
-    cal = max(cal, 1200)  # 底线
+    s = str(sex).strip().lower()
+    male = s in ("男", "男性", "m", "male")
+    safety_floor = 1500 if male else 1200
+    cal = max(cal, safety_floor)  # 依据临床与运动营养学指南，区分男/女性最低生理代谢安全底线
 
     # 供能比默认：蛋白质25%(增肌可上调)，碳水45%，脂肪30%
     ratio = {"蛋白": 0.25, "碳水": 0.45, "脂肪": 0.30}
@@ -69,14 +88,17 @@ def daily_targets(sex, weight, height, age, activity="轻度", goal="维持"):
     protein_g = cal * ratio["蛋白"] / 4
     carb_g = cal * ratio["碳水"] / 4
     fat_g = cal * ratio["脂肪"] / 9
+    protein_g_per_kg = round(protein_g / float(weight), 2)
     return {
         "bmr": round(bmr),
         "tdee": round(tdee),
         "activity": activity,
         "goal": goal,
+        "safety_floor": safety_floor,
         "cal_target": round(cal),
         "ratio": ratio,
         "protein_g_target": round(protein_g),
+        "protein_g_per_kg": protein_g_per_kg,
         "carb_g_target": round(carb_g),
         "fat_g_target": round(fat_g),
     }

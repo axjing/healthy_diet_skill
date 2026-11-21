@@ -1,298 +1,203 @@
-# Healthy Diet - 饮食热量记录与营养分析
+# Healthy Diet - 个人饮食营养记录与代谢管理 Agent Skill
 
 [![Agent Skills Standard](https://img.shields.io/badge/Agent_Skills-agentskills.io-blue)](https://agentskills.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests: 25 Passed](https://img.shields.io/badge/Tests-25%20Passed-brightgreen)](tests/)
+[![Tests: 27 Passed](https://img.shields.io/badge/Tests-27%20Passed-brightgreen)](tests/)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero%20(Stdlib)-success)](scripts/)
 
-把自然语言饮食描述解析为结构化记录，自动核算热量与营养素，存入按日期分文件的本地 JSON 数据，并提供目标管理、统计分析、健康评估与数据导出。本技能遵循 [agentskills.io](https://agentskills.io) 开放标准构建。
+专为 AI Agent 打造的确定性生理代谢与饮食健康管理 Agent Skill。将饮食输入（文字描述或多模态照片）转化为高精度结构化营养数据，按日期分文件原子持久化至本地 JSON，基于 Atwater 与 Delta Mass 物理能量质量守恒定律核算热量，并通过 Forbes 闭环自适应能量代谢回归提供量化生理遥测。
 
-## 功能概览
+本技能遵循 [agentskills.io](https://agentskills.io) 开放标准构建。
 
-| 模块 | 说明 |
-|------|------|
-| **饮食记录** | 自然语言输入，自动解析食物名、数量、单位、烹饪方式 |
-| **图片识别** | 多模态大模型（QwenVL/GLM-4V/GPT-4o）拍照识别，自动生成饮食描述 |
-| **营养核算** | 数量 × 单位 → 克 → 查表 → 烹饪修正 → 输出 7 项营养素 |
-| **目标管理** | Mifflin-St Jeor 公式算 BMR/TDEE，给出热量与三大宏量目标 |
-| **统计分析** | 单日/区间汇总，含摄入、运动消耗、净热量 |
-| **健康评估** | 百分制评分 + 问题项 + 针对性饮食建议 |
-| **数据导出** | CSV / JSON，含运动消耗和净热量列 |
-| **自定义食物** | 用户可添加库外食物，后续记录中直接使用 |
+---
+
+## 核心设计哲学 (First Principles)
+
+1. **Agent 作为大脑与感知端**：
+   - **原生多模态视觉**：用户发来餐食照片，由 Agent 视网膜直读分解食材，**无需配置任何第三方 Vision API Key**，全流程 100% 本地运行。
+   - **语义抽取与消歧**：处理方言、倒装、模糊词与否定排除，将口语提炼为结构化条目。
+   - **开放世界自愈补偿**：遇到冷门食物，由 Agent 凭借世界常识估算并调用 `custom` 动态注册入库。
+   - **动态情境化教练**：结合纯数值遥测指标（`telemetry`），为用户生成个性化、有温度的专业建议。
+2. **Skill 作为外骨骼与确定性物理底座**：
+   - **100% Python 标准库**：零第三方依赖，杜绝环境污染与依赖地狱。
+   - **物理守恒定律**：Delta Mass 烹饪油脂增量模型（外源吸油 $\Delta m_{\text{oil}} = \Delta E / 9.0\text{ g}$），透明披露 `cooking_oil_g`。
+   - **Forbes 闭环能量自适应**：依据真实摄入大账本与体重遥测序列，反推真实物理 TDEE，揭示自适应生热（平台期）。
+   - **绝对可移植性**：无任何硬编码绝对路径，支持 `HEALTHY_DIET_DATA_DIR` 环境变量实现容器与多用户数据隔离。
+
+---
+
+## 核心功能矩阵
+
+| 模块 | CLI 命令 | Python SDK 接口 | 说明 |
+| :--- | :--- | :--- | :--- |
+| **饮食记录** | `app.py record [--items '<JSON>']` | `app.record(...)` | 记录饮食，首选结构化 JSON，亦支持自然语言口语 |
+| **生理遥测** | `app.py telemetry [date]` | `app.telemetry(...)` | 获取单日能量、三大宏量缺口克数、油盐与雷达评分 |
+| **体重遥测** | `app.py weight <kg>` | `app.weight(...)` | 记录晨起体重，自动同步全量时序大账本 |
+| **运动打卡** | `app.py exercise <项目> <分> <卡>` | `app.exercise(...)` | 记录运动消耗，更新生理净热量 |
+| **闭环校准** | `app.py adaptive [--days 30]` | `app.adaptive(...)` | 基于真实进食与体重时序回归自适应 TDEE 与代谢适应 |
+| **自愈注册** | `app.py custom <名> <卡> ...` | `app.custom(...)` | 注册库外冷门/自制食品，自愈本地知识图谱 |
+| **身体档案** | `app.py profile_init ...` | `app.profile(...)` | 初始化用户身体生理基准与目标配额 |
+| **时序导出** | `app.py export ...` | `app.history(...)` | 导出时间序列总账 (CSV/JSON) |
+
+---
+
+## 安装与智能体挂载 (Installation & Agent Setup)
+
+本项目严格遵循 [agentskills.io](https://agentskills.io) 开放规范，支持通过 **npm / npx 智能体生态** 极简安装与挂载给各类 AI 智能体（Claude Code, Cursor, Antigravity, GitHub Copilot 等）。
+
+### 1. 推荐：通过 `npx skills` 官方智能体包管理器安装 (Agent Skills Manager)
+[skills CLI](https://github.com/vercel-labs/skills) 是目前 AI 智能体的事实标准包管理器。只需一行命令即可将本技能挂载到指定智能体或全局工作区：
+
+```bash
+# 方式 A：从 GitHub 仓库一键为当前项目添加本技能（智能体自动识别 .agents/skills/）
+npx skills add axjing/healthy_diet_skill
+
+# 方式 B：本地开发调试：在本项目根目录下直接挂载安装
+npx skills add .
+
+# 方式 C：全局安装给宿主所有智能体使用 (-g，跨项目全部生效)
+npx skills add axjing/healthy_diet_skill -g
+
+# 方式 D：指定特定智能体客户端挂载（如 Claude Code）
+npx skills add axjing/healthy_diet_skill --agent claude-code
+```
+
+### 2. npm / npx 命令行工具执行与引入 (Node.js & npm Integration)
+本项目已完整配置 `package.json` 与跨平台二进制引导器 `bin/healthy-diet.js`：
+
+```bash
+# 方式 A：免安装，直接通过 npx 运行饮食与遥测命令
+npx healthy-diet-skill record "1碗米饭, 150克煎鸡胸肉"
+npx healthy-diet-skill telemetry
+
+# 方式 B：通过 npm 全局安装 CLI 工具
+npm install -g healthy-diet-skill
+healthy-diet telemetry
+
+# 方式 C：作为项目本地开发依赖安装
+npm install -D healthy-diet-skill
+```
+
+### 3. 主流智能体客户端目录一键挂载 (Manual / Git Clone)
+若直接通过 Git 管理，可将本仓库克隆至各智能体框架的预设扩展路径：
+
+| 智能体客户端 | 推荐安装路径 | 一键挂载命令 |
+| :--- | :--- | :--- |
+| **Claude Code** | `~/.claude/skills/healthy-diet` | `git clone https://github.com/axjing/healthy_diet_skill.git ~/.claude/skills/healthy-diet` |
+| **Google Antigravity / Gemini CLI** | `~/.gemini/skills/healthy-diet` | `git clone https://github.com/axjing/healthy_diet_skill.git ~/.gemini/skills/healthy-diet` |
+| **Cursor / Universal Agents** | `.agents/skills/healthy-diet` | `git clone https://github.com/axjing/healthy_diet_skill.git .agents/skills/healthy-diet` |
+
+### 4. 运行前置环境
+- **Node.js**: `>= 18.0.0`（仅使用 npm / npx 安装管理工具时需要）
+- **Python**: `>= 3.10+`（底层物理计算与持久化引擎，**100% 仅使用标准库，无需 pip 安装任何外部依赖**）
+
+---
 
 ## 快速开始
 
 ```bash
-# 1. 初始化用户档案（仅需一次）
+# 1. 初始化用户身体档案与目标
 python scripts/app.py profile_init 男 70 175 30 轻度 减重
 
-# 2. 记录一餐
-python scripts/app.py add 2026-09-07 "1碗米饭,150克鸡胸肉(煎),1个鸡蛋,清炒西兰花"
+# 2. 记录一餐（首选结构化条目，免疫正则歧义）
+python scripts/app.py record --items '[{"food": "米饭", "amount": 1.5, "unit": "碗"}, {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}]'
 
-# 3. 查看当日分析
-python scripts/app.py day 2026-09-07 --targets
+# 2.b 亦支持极简自然语言描述
+python scripts/app.py record "1碗半米饭, 150克煎鸡胸肉, 清炒西兰花"
 
-# 4. 健康评估
-python scripts/suggest.py 2026-09-07
+# 3. 记录晨起体重遥测
+python scripts/app.py weight 70.2
 
-# 5. 区间统计与导出
-python scripts/app.py range 2026-09-01 2026-09-07
-python scripts/app.py export 2026-09-01 2026-09-07 output.csv --format csv
+# 4. 记录运动消耗
+python scripts/app.py exercise 慢跑 30 300
+
+# 5. 获取高密度量化遥测指标（专供 Agent 决策认知）
+python scripts/app.py telemetry
+
+# 6. 运行闭环能量代谢自适应回归校准
+python scripts/app.py adaptive --days 30
 ```
 
-## 图片识别（可选，需多模态大模型 API）
+### Python SDK 原生调用示例 (适合 CodeAct / Notebook 智能体)
+```python
+from scripts import app
 
-拍照即可记录一餐，openai Python 库调用多模态大模型自动识别食物并生成结构化描述，复用现有核算引擎：
+# 结构化记录
+res = app.record(items=[
+    {"food": "米饭", "amount": 1, "unit": "碗"},
+    {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}
+], meal="午餐")
 
-```bash
-# 0. 安装依赖（仅图片识别需要）
-pip install openai
-
-# 1. 配置服务商（仅一次）
-python scripts/app.py vision list                                # 查看支持的服务商
-python scripts/app.py vision config qwen sk-xxxxxxxx --model qwen-vl-max
-
-# 2.a 拍照识别并直接记录
-python scripts/app.py add 2026-09-07 --image lunch.jpg --meal 午餐
-
-# 2.b 只识别看结果，不写入记录
-python scripts/app.py analyze lunch.jpg
+# 获取高密度生理遥测
+telemetry = app.telemetry()
+print(f"剩余热量预算: {telemetry['telemetry']['energy']['remaining_cal']} kcal")
+print(f"蛋白质尚缺口: {telemetry['telemetry']['macros']['protein_g']['gap_g']} g")
 ```
 
-**支持的服务商**（OpenAI 兼容接口，多模型可切换）：
+---
 
-| provider | 服务 | 默认模型 | API Key 环境变量 |
-|----------|------|---------|-------------------|
-| `qwen` | 通义千问 QwenVL | `qwen-vl-max` | `DASHSCOPE_API_KEY` |
-| `glm` | 智谱 GLM-4V | `glm-4v` | `ZHIPUAI_API_KEY` |
-| `openai` | OpenAI GPT-4o | `gpt-4o` | `OPENAI_API_KEY` |
+## 物理守恒与营养学模型
 
-**Key 来源优先级**：`vision config` 显式配置 > 环境变量。还可执行：
+1. **Atwater 与 Delta Mass 烹饪油脂吸附守恒**：
+   $$\Delta E = E_{\text{base}} \times (\text{Factor} - 1.0)$$
+   $$\Delta m_{\text{oil}} = \frac{\Delta E}{9.0\text{ kcal/g}}, \quad \text{Fat}_{\text{total}} = \text{Fat}_{\text{raw}} + \Delta m_{\text{oil}}$$
+   系统在每条单品明细中输出确凿的 `cooking_oil_g`，原生蛋白质与纤维绝不虚假膨胀。
+2. **Forbes 组织能量密度与闭环自适应 TDEE**：
+   $$1\text{ kg 体重变化} \approx 7,700\text{ kcal}$$
+   $$\text{TDEE}_{\text{empirical}} = \bar{E}_{\text{intake}} - \frac{(W_{\text{end}} - W_{\text{start}}) \times 7,700}{\Delta t}$$
+3. **质量锚定蛋白质保护**：
+   减脂期蛋白质按体重强制锚定 **$1.9\text{ g/kg}$**，守住去脂体重。
 
-```bash
-python scripts/app.py analyze lunch.jpg --dry-run   # 预览将发送的请求体（不发请求）
-python scripts/app.py analyze lunch.jpg --provider openai --model gpt-4o   # 临时切换
-```
-
-识别产出的描述（如 `1碗米饭，150克鸡胸肉(煎)`）会经过 `calc.parse_meal` 标准化——单位换算、烹饪修正、食物库匹配全链路复用，存储格式与手输完全一致。**未配置 API Key 时，纯文字记录功能不受影响，完全离线可用。**
-
-## 命令参考
-
-### 饮食记录
-
-```bash
-# 基本记录（日期 + 描述，逗号分隔多种食物）
-python scripts/app.py add <日期> "<食物描述>"
-
-# 指定餐次和补记时间
-python scripts/app.py add 2026-09-06 "2个鸡蛋,1杯牛奶" --meal 早餐 --ts "2026-09-06 07:30:00"
-
-# 只核算不保存
-python scripts/app.py eval "150克鸡胸肉(煎),1碗米饭"
-```
-
-**餐次**：可选 早餐 / 午餐 / 晚餐 / 加餐。不指定则按时间自动归类（`--ts` 或当前时间）。
-
-**食物描述语法**：
-- 分隔符：逗号 `,`、中文逗号 `，`、分号 `;`、顿号 `、`、换行
-- `2个鸡蛋` → 数量 2 × 单位 个（50g/个）
-- `150克鸡胸肉(煎)` → 150g，烹饪系数 1.35
-- `清炒西兰花` → 自动识别"清炒"烹饪方式
-- 无数字默认 1，无单位按食物库中常见一份量（优先计数单位 个/块/片，其次 份/碗/杯）
-- 数量后置同样支持：`米饭150克`、`鸡蛋2个`
-- 中文数字：`二两米饭`、`半碗粥`、`二十个饺子`；数量为 0 或负数会被拒绝
-
-### 餐次管理
-
-```bash
-# 查看某日所有餐次（索引从 0 开始）
-python scripts/app.py day 2026-09-07
-
-# 修改餐次描述或餐次类别
-python scripts/app.py edit <日期> <索引> --text "新描述" --meal 午餐
-
-# 删除某餐
-python scripts/app.py delete <日期> <索引>
-```
-
-### 运动记录
-
-```bash
-python scripts/app.py exercise 2026-09-07 跑步 30 300
-#                              日期      项目   分钟  千卡
-```
-
-`day` 和 `range` 输出会自动包含 `exercise_cal`（运动消耗）和 `net_cal`（净摄入）。
-
-### 目标管理
-
-```bash
-# 单次计算（不保存）
-python scripts/app.py goals <性别> <体重kg> <身高cm> <年龄> <活动量> <目标>
-
-# 初始化档案并保存（后续 day --targets 自动读取）
-python scripts/app.py profile_init <性别> <体重kg> <身高cm> <年龄> <活动量> <目标>
-```
-
-**活动量**：久坐(1.2) / 轻度(1.375) / 中度(1.55) / 重度(1.725) / 极高(1.9)
-
-**目标**：减重(-500) / 减脂(-400) / 维持(0) / 增肌(+300) / 增重(+400)
-
-活动量支持别名：`不运动`→久坐，`每周运动1-3次`→轻度，`每周运动3-5次`→中度，等等。
-
-### 统计与导出
-
-```bash
-# 区间统计（含运动消耗和净热量）
-python scripts/app.py range <开始日期> <结束日期>
-
-# 导出 CSV（含 date,cal,protein,carb,fat,fiber,sugar,sodium,exercise_cal,net_cal）
-python scripts/app.py export <开始日期> <结束日期> <输出路径> --format csv
-
-# 导出 JSON
-python scripts/app.py export <开始日期> <结束日期> output.json --format json
-```
-
-### 健康评估
-
-```bash
-python scripts/suggest.py <日期>
-```
-
-输出包含：
-- **健康评分**（百分制，扣分项）
-- **问题项**（热量超标/不足、蛋白质偏低、碳水/脂肪/糖/钠偏高、膳食纤维不足）
-- **针对性建议**（具体食物推荐）
-- **运动净热量**（如有运动记录）
-
-评估基于已保存的档案目标。未设置档案时，仅给出基于摄入量的通用建议。
-
-### 自定义食物
-
-```bash
-python scripts/app.py custom <名称> <每100g千卡> \
-    --protein <克> --carb <克> --fat <克> --sugar <克> --sodium <毫克>
-```
-
-自定义食物保存到 `data/custom_foods.json`，后续记录中直接使用名称即可匹配。
-
-## 输出示例
-
-```
-【9月7日 星期四】早餐 · 午餐 · 晚餐
-- 摄入 1,650 千卡 / 目标 1,767（剩 117）
-- 蛋白 85g(64%)  碳水 180g(102%)  脂肪 48g(81%)
-- 钠 1,860mg  糖 12g  膳食纤维 18g
-- 运动消耗 300 千卡，净摄入 1,350 千卡
-```
-
-## 数据结构
-
-```
-data/
-├── foods.json          # 内置食物库（~140 种常见食物，每 100g 营养值）
-├── units.json          # 口语单位 → 克换算表 + 烹饪方式热量修正系数
-├── settings.json       # 用户档案（profile_init 写入）
-├── custom_foods.json   # 用户自定义食物（custom 命令写入）
-└── records/
-    └── 2026-09-07.json # 某日记录（meals 列表 + exercise 列表）
-```
-
-### 每日记录格式
-
-```json
-{
-  "date": "2026-09-07",
-  "meals": [
-    {
-      "ts": "2026-09-07 12:30:00",
-      "meal": "午餐",
-      "text": "1碗米饭,150克鸡胸肉(煎)",
-      "items": [...],
-      "totals": {"cal": 443, "protein": 52.5, ...}
-    }
-  ],
-  "exercise": [
-    {"item": "跑步", "min": 30, "cal": 300}
-  ]
-}
-```
-
-## 烹饪修正系数
-
-食物入库时的营养值为食材原始数据，记录时根据烹饪方式自动调整：
-
-| 烹饪方式 | 系数 | 适用说明 |
-|---------|------|---------|
-| 蒸/煮/炖/凉拌/白灼/清蒸/水煮 | 1.0 | 无额外油脂，基准值 |
-| 清炒 | 1.1 | 少量油 |
-| 炒/爆炒/烧烤/烤/烟熏/火锅 | 1.2 | 中等油脂（裸"炒"如"西红柿炒蛋"） |
-| 红烧/干煎/油焖/糖醋/麻辣 | 1.35–1.4 | 较多油脂 |
-| 干煸 | 1.5 | 高油脂 |
-| 油炸/炸 | 1.7 | 油炸食品 |
-
-**注意**：已完成菜品（菜肴/快餐/零食等类别）和烹饪词已内嵌在食物名中的（如"红烧排骨""烤红薯"）不再重复加成，避免虚高。
-
-## 营养素说明
-
-| 字段 | 说明 | 单位 |
-|------|------|------|
-| cal | 热量 | 千卡(kcal) |
-| protein | 蛋白质 | 克(g) |
-| carb | 碳水化合物 | 克(g) |
-| fat | 脂肪 | 克(g) |
-| fiber | 膳食纤维 | 克(g) |
-| sugar | 糖（含天然糖与添加糖总量） | 克(g) |
-| sodium | 钠 | 毫克(mg) |
-
-## 环境要求
-
-- **Python 3.10+**
-- 核心功能（记录/统计/目标/评估）仅依赖标准库
-- **图片识别（可选）**需安装 `pip install openai`
-- Windows 下建议设置 `PYTHONIOENCODING=utf-8` 或脚本已内置 UTF-8 输出修复
+---
 
 ## 项目结构 (遵循 agentskills.io 规范)
 
 ```
 healthy-diet/
 ├── SKILL.md            # Required: Agent 技能元数据 (YAML Frontmatter) 与执行指导
-├── README.md           # 人类开发者项目说明与快速指南
+├── README.md           # 项目说明与快速开始指南
 ├── LICENSE             # MIT 开源许可证
-├── .gitignore          # 忽略用户运行时记录与本地配置
-├── scripts/            # 可执行确定性工具代码
-│   ├── app.py          # CLI 主入口，命令调度，数据 CRUD
-│   ├── calc.py         # 核心解析引擎：自然语言 → 结构化食物记录
-│   ├── goals.py        # BMR/TDEE 计算（Mifflin-St Jeor），宏量目标
-│   ├── suggest.py      # 健康评估：评分 + 问题诊断 + 针对性建议
-│   └── vision.py       # 多模态图片识别（可选）：QwenVL/GLM-4V/GPT-4o
+├── .gitignore          # 忽略用户运行时数据 (records, settings, exports)
+├── docs/               # 深度技术方案与架构文档
+│   └── agent_skill_architecture_plan.md # 完整架构重构规范与全量字段量纲说明
+├── scripts/            # 确定性工具引擎 (100% Python 标准库，零外部依赖)
+│   ├── __init__.py     # 标准 Python 包声明
+│   ├── app.py          # 主入口、CLI 调度、原子持久化与 Python SDK
+│   ├── calc.py         # 物理计算引擎：结构化/口语解析、Delta Mass 模型
+│   ├── goals.py        # BMR/TDEE 目标与 Forbes 闭环自适应代谢回归
+│   └── suggest.py      # 双相状态机 (pacing/auditing) 与高密度遥测向量输出
 ├── references/         # 渐进式披露参考文档 (Progressive Disclosure)
 │   ├── nutrition_science.md # 代谢生理学、蛋白质定额、烹饪修正系数表
-│   └── schema.md       # JSON 数据结构规范与字段定义
-├── assets/             # 静态模板与资源
+│   └── schema.md       # JSON 数据结构规范与全量字段量纲定义
+├── assets/             # 静态模板
 │   └── record_template.json # 饮食记录数据模板
-├── tests/              # 自动化测试套件 (pytest / unittest)
-│   ├── test_calc.py    # 自然语言解析、复合菜品、未识别项测试
-│   ├── test_goals.py   # BMR/TDEE、代谢底线与蛋白质定额测试
-│   ├── test_suggest.py # 健康评估与扣分诊断测试
-│   ├── test_vision.py  # 多模态输出清洗测试
-│   └── test_app.py     # 数据持久化与 CLI 逻辑集成测试
-└── data/               # 运行时基础营养库与数据存储
-    ├── foods.json      # 内置食物营养数据库
-    └── units.json      # 单位换算表 + 烹饪修正系数
+├── tests/              # 自动化测试套件
+│   ├── test_calc.py    # 自然语言解析、结构化条目、Delta Mass 物理测试
+│   ├── test_goals.py   # BMR/TDEE、代谢底线与 Forbes 闭环回归测试
+│   ├── test_suggest.py # 遥测向量、双相状态机与扣分审计测试
+│   └── test_app.py     # 数据持久化、Python SDK 与 CLI 逻辑集成测试
+└── data/               # 基础营养知识图谱
+    ├── foods.json      # 内置标准食物营养数据库
+    └── units.json      # 单位换算表与烹饪修正系数
 ```
+
+---
 
 ## 测试运行
 
+系统自带完整的单元测试套件，毫秒级运行：
+
 ```bash
+# 使用 pytest
 pytest -v
-# 或使用标准库：
+
+# 或使用标准库 unittest（零安装运行）
 python -m unittest discover tests -v
 ```
 
-## 设计决策
+---
 
-- **按日期分文件**：一个 `YYYY-MM-DD.json`，离线可用，易追溯，方便 grep
-- **纯 JSON 存储**：无数据库依赖，任何编辑器/脚本可直接处理
-- **自然语言解析优先**：最大兼容用户口语输入，而非强制结构化格式
-- **烹饪修正后置**：食物库保持食材原始值，用户描述烹饪方式后才应用系数
-- **成品菜不二次加成**：菜肴/快餐/零食等已含烹饪热量，与原始食材区分处理
+## 开源协议
+
+本项目采用 [MIT License](LICENSE) 授权许可。

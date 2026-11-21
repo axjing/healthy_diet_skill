@@ -36,7 +36,7 @@
     {"name": "低脂牛奶", "category": "奶类", "cal": 45, "protein": 3.4, "carb": 5, "fat": 1.5, "fiber": 0, "sugar": 5, "sodium": 40, "serving": {"杯": 250, "盒": 250}},
     {"name": "无糖酸奶", "category": "奶类", "cal": 62, "protein": 3.6, "carb": 4.6, "fat": 3.4, "fiber": 0, "sugar": 4.6, "sodium": 55, "serving": {"杯": 180, "盒": 100}},
     {"name": "酸奶(含糖)", "aliases": ["风味酸奶", "甜酸奶"], "category": "奶类", "cal": 90, "protein": 2.8, "carb": 12, "fat": 3, "fiber": 0, "sugar": 12, "sodium": 60, "serving": {"杯": 180, "盒": 100}},
-    {"name": "鸡胸肉", "aliases": ["鸡胸", "白肉"], "category": "肉禽", "cal": 133, "protein": 24, "carb": 0, "fat": 4, "fiber": 0, "sugar": 0, "sodium": 50, "serving": {"块": 150, "片": 100, "两": 50}},
+    {"name": "鸡胸肉", "aliases": ["鸡胸", "白肉", "鸡肉"], "category": "肉禽", "cal": 133, "protein": 24, "carb": 0, "fat": 4, "fiber": 0, "sugar": 0, "sodium": 50, "serving": {"块": 150, "片": 100, "两": 50}},
     {"name": "鸡腿", "aliases": ["鸡大腿"], "category": "肉禽", "cal": 181, "protein": 16, "carb": 0, "fat": 13, "fiber": 0, "sugar": 0, "sodium": 60, "serving": {"只": 200, "小只": 150}},
     {"name": "鸡翅", "category": "肉禽", "cal": 194, "protein": 18, "carb": 0, "fat": 13, "fiber": 0, "sugar": 0, "sodium": 60, "serving": {"个": 30, "只": 60}},
     {"name": "鸭肉", "category": "肉禽", "cal": 240, "protein": 15.5, "carb": 0.2, "fat": 19.7, "fiber": 0, "sugar": 0, "sodium": 69, "serving": {"块": 100, "两": 50}},
@@ -103,7 +103,7 @@
     {"name": "啤酒", "category": "饮品", "cal": 43, "protein": 0.4, "carb": 3.5, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 5, "serving": {"罐": 330, "瓶": 500, "ml": 1}},
     {"name": "红酒", "category": "饮品", "cal": 85, "protein": 0.1, "carb": 2.6, "fat": 0, "fiber": 0, "sugar": 0.6, "sodium": 5, "serving": {"杯": 150, "ml": 1}},
     {"name": "白酒", "category": "饮品", "cal": 298, "protein": 0, "carb": 0, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 0, "serving": {"杯": 50, "两": 50, "ml": 1}},
-    {"name": "咖啡(黑)", "category": "饮品", "cal": 2, "protein": 0.1, "carb": 0.4, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 2, "serving": {"杯": 240, "ml": 1}},
+    {"name": "咖啡(黑)", "aliases": ["黑咖啡", "美式咖啡", "美式", "纯黑咖啡", "斋啡"], "category": "饮品", "cal": 2, "protein": 0.1, "carb": 0.4, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 2, "serving": {"杯": 240, "ml": 1}},
     {"name": "拿铁", "category": "饮品", "cal": 45, "protein": 2.5, "carb": 4, "fat": 2, "fiber": 0, "sugar": 4, "sodium": 40, "serving": {"杯": 300, "ml": 1}},
     {"name": "白糖冰淇淋", "category": "零食甜品", "cal": 207, "protein": 3.5, "carb": 24, "fat": 11, "fiber": 0.5, "sugar": 21, "sodium": 54, "serving": {"个": 100, "球": 50}},
     {"name": "巧克力", "category": "零食甜品", "cal": 546, "protein": 4.3, "carb": 60, "fat": 31, "fiber": 3, "sugar": 50, "sodium": 20, "serving": {"块": 20, "粒": 5}},
@@ -153,6 +153,12 @@
     {"name": "寿司", "category": "综合/快餐", "cal": 150, "protein": 5, "carb": 28, "fat": 2, "fiber": 1, "sugar": 3, "sodium": 300, "serving": {"个": 25, "贯": 25}},
     {"name": "沙拉(轻食)", "category": "综合/快餐", "cal": 120, "protein": 8, "carb": 12, "fat": 4, "fiber": 4, "sugar": 4, "sodium": 200, "serving": {"份": 250, "碗": 250}},
     {"name": "鸡胸肉沙拉", "category": "综合/快餐", "cal": 160, "protein": 20, "carb": 10, "fat": 5, "fiber": 4, "sugar": 4, "sodium": 300, "serving": {"份": 300}},
-    {"name": "藜麦沙拉", "category": "综合/快餐", "cal": 180, "protein": 8, "carb": 24, "fat": 6, "fiber": 5, "sugar": 4, "sodium": 250, "serving": {"份": 300}}
+    {"name": "藜麦沙拉", "category": "综合/快餐", "cal": 180, "protein": 8, "carb": 24, "fat": 6, "fiber": 5, "sugar": 4, "sodium": 250, "serving": {"份": 300}},
+    {"name": "燕麦粥", "aliases": ["燕麦糊", "煮燕麦", "燕麦牛奶粥", "麦片粥"], "category": "主食", "cal": 55, "protein": 2.0, "carb": 9.5, "fat": 1.0, "fiber": 1.5, "sugar": 0.5, "sodium": 10, "serving": {"碗": 250, "小碗": 180, "大碗": 350}},
+    {"name": "水", "aliases": ["白开水", "矿泉水", "纯净水", "饮用水", "温水", "开水", "凉开水"], "category": "饮品", "cal": 0, "protein": 0, "carb": 0, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 0, "serving": {"杯": 250, "瓶": 500, "ml": 1, "碗": 250}},
+    {"name": "乌龙茶", "aliases": ["无糖乌龙茶", "茶", "绿茶", "红茶", "茶水", "普洱茶", "无糖茶"], "category": "饮品", "cal": 1, "protein": 0, "carb": 0.2, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 2, "serving": {"杯": 250, "瓶": 500, "ml": 1}},
+    {"name": "牛排", "aliases": ["煎牛排", "牛扒", "西冷牛排", "菲力牛排", "肋眼牛排"], "category": "菜肴", "cal": 220, "protein": 24, "carb": 0, "fat": 14, "fiber": 0, "sugar": 0, "sodium": 200, "serving": {"块": 150, "份": 150}},
+    {"name": "三明治", "aliases": ["全麦三明治", "鸡肉三明治", "火腿三明治"], "category": "综合/快餐", "cal": 210, "protein": 12.0, "carb": 25.0, "fat": 7.0, "fiber": 2.0, "sugar": 2.5, "sodium": 450, "serving": {"个": 180, "份": 180}},
+    {"name": "米粉", "aliases": ["桂林米粉", "汤米粉", "炒米粉", "米线", "河粉"], "category": "主食", "cal": 110, "protein": 2.0, "carb": 24.0, "fat": 0.5, "fiber": 0.5, "sugar": 0.0, "sodium": 200, "serving": {"碗": 300, "份": 300}}
   ]
 }

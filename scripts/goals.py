@@ -2,7 +2,9 @@
 """目标管理：BMR / TDEE / 每日热量与营养素目标推荐（Mifflin-St Jeor 公式）。
 """
 import json
+import os
 import sys
+from datetime import datetime, timedelta
 
 # Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -85,7 +87,21 @@ def daily_targets(sex, weight, height, age, activity="轻度", goal="维持"):
     if goal in ("减重", "减脂"):
         ratio = {"蛋白": 0.30, "碳水": 0.40, "脂肪": 0.30}
 
-    protein_g = cal * ratio["蛋白"] / 4
+    # 依据 ISSN / Morton et al.，按目标设定体重锚定蛋白质每公斤克数，
+    # 彻底消除“热量赤字越大、蛋白质目标反而越萎缩”的代谢分解悖论
+    protein_anchor_map = {
+        "减重": 1.9,
+        "减脂": 1.9,
+        "维持": 1.4,
+        "增肌": 1.8,
+        "增重": 1.8,
+    }
+    anchor_per_kg = protein_anchor_map.get(goal, 1.5)
+    protein_by_weight = float(weight) * anchor_per_kg
+    protein_by_ratio = cal * ratio["蛋白"] / 4
+    # 取二者中更安全的充足值（减脂低热量时优先体重锚定，防止肌肉流失）
+    protein_g = max(protein_by_ratio, protein_by_weight) if goal in ("减重", "减脂") else protein_by_ratio
+
     carb_g = cal * ratio["碳水"] / 4
     fat_g = cal * ratio["脂肪"] / 9
     protein_g_per_kg = round(protein_g / float(weight), 2)
@@ -101,6 +117,96 @@ def daily_targets(sex, weight, height, age, activity="轻度", goal="维持"):
         "protein_g_per_kg": protein_g_per_kg,
         "carb_g_target": round(carb_g),
         "fat_g_target": round(fat_g),
+    }
+
+
+def calibrate_adaptive_tdee(records_dir, fallback_tdee=2000.0, window_days=30):
+    """闭环自适应代谢遥测：基于过去 window_days 天的体重遥测变化与实际净摄入反推真实物理 TDEE。
+    原理公式：Delta Energy (kcal) = Delta Weight (kg) * 7700 kcal
+    真实 TDEE = 平均净摄入 - (Delta Energy / 间隔天数)
+    """
+    if not os.path.exists(records_dir):
+        return {
+            "status": "insufficient_data",
+            "message": "暂无历史饮食记录，继续使用先验经验公式 (Mifflin-St Jeor)",
+            "tdee": round(fallback_tdee)
+        }
+
+    files = sorted([f for f in os.listdir(records_dir) if f.endswith(".json") and len(f) == 15])
+    if len(files) < 7:
+        return {
+            "status": "insufficient_data",
+            "message": f"当前记录天数 ({len(files)} 天) 不足 7 天，暂无法构建自适应闭环模型，继续使用先验估算",
+            "days_recorded": len(files),
+            "tdee": round(fallback_tdee)
+        }
+
+    cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    valid_data = []
+    for fname in files:
+        d_str = fname[:-5]
+        if d_str < cutoff:
+            continue
+        p = os.path.join(records_dir, fname)
+        try:
+            with open(p, encoding="utf-8") as f:
+                day = json.load(f)
+        except Exception:
+            continue
+        cal_total = sum(m.get("totals", {}).get("cal", 0) for m in day.get("meals", []))
+        ex_total = sum(e.get("cal", 0) for e in day.get("exercise", []))
+        w = day.get("weight")
+        valid_data.append({
+            "date": d_str,
+            "intake": cal_total,
+            "exercise": ex_total,
+            "net": cal_total - ex_total,
+            "weight": float(w) if w is not None else None
+        })
+
+    weights_logged = [x for x in valid_data if x["weight"] is not None]
+    if len(weights_logged) < 2:
+        return {
+            "status": "missing_weight_telemetry",
+            "message": "体重遥测数据不足（需至少记录 2 次以上体重），请使用 `diet weight <kg>` 记录晨起体重以开启代谢自适应闭环",
+            "weights_count": len(weights_logged),
+            "tdee": round(fallback_tdee)
+        }
+
+    first_w = weights_logged[0]
+    last_w = weights_logged[-1]
+    d_start = datetime.strptime(first_w["date"], "%Y-%m-%d")
+    d_end = datetime.strptime(last_w["date"], "%Y-%m-%d")
+    delta_days = (d_end - d_start).days
+
+    if delta_days < 7:
+        return {
+            "status": "time_span_too_short",
+            "message": f"两次体重记录间隔仅 {delta_days} 天（建议至少 7 天以消除水分波动干扰），继续使用基准 TDEE",
+            "days_between": delta_days,
+            "tdee": round(fallback_tdee)
+        }
+
+    period_data = [x for x in valid_data if first_w["date"] <= x["date"] <= last_w["date"]]
+    avg_intake = sum(x["intake"] for x in period_data) / max(len(period_data), 1)
+
+    delta_weight = last_w["weight"] - first_w["weight"]
+    delta_stored_energy = delta_weight * 7700.0
+    daily_energy_flux = delta_stored_energy / delta_days
+
+    adaptive_tdee_val = avg_intake - daily_energy_flux
+    clamped_tdee = max(1000.0, min(4500.0, adaptive_tdee_val))
+    deviation = round(clamped_tdee - fallback_tdee, 1)
+
+    return {
+        "status": "calibrated",
+        "message": f"闭环自适应校准成功：基于 {delta_days} 天真实体重变化 ({delta_weight:+.2f}kg) 与日均摄入 ({avg_intake:.0f} kcal) 反推计算",
+        "adaptive_tdee": round(clamped_tdee),
+        "empirical_tdee": round(fallback_tdee),
+        "metabolic_deviation": deviation,
+        "days_span": delta_days,
+        "delta_weight_kg": round(delta_weight, 2),
+        "avg_daily_intake_kcal": round(avg_intake, 1)
     }
 
 

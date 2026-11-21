@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+data/records/
+data/settings.json
+data/custom_foods.json
+data/exports/

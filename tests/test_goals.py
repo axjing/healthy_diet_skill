@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 import os
 import sys
 import unittest
@@ -47,6 +48,37 @@ class TestGoalsModule(unittest.TestCase):
             goals.daily_targets("未知", 70, 175, 30)  # Invalid sex
         with self.assertRaises(ValueError):
             goals.daily_targets("男", 70, 175, 30, goal="未知目标")
+
+    def test_adaptive_tdee_calibration(self):
+        import tempfile
+        import shutil
+        test_dir = tempfile.mkdtemp()
+        try:
+            # 模拟 14 天记录：体重从 80.0kg 降至 79.0kg (-1.0kg)，日均摄入 2000 kcal
+            # 物理闭环推导：14天减重1kg说明每日存在 7700/14 = 550 kcal 缺口，真实 TDEE = 2000 - (-550) = 2550 kcal
+            from datetime import datetime, timedelta
+            base_date = datetime.now() - timedelta(days=15)
+            for i in range(15):
+                d_str = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
+                record = {
+                    "date": d_str,
+                    "meals": [{"totals": {"cal": 2000.0}}],
+                    "exercise": [],
+                }
+                if i == 0:
+                    record["weight"] = 80.0
+                elif i == 14:
+                    record["weight"] = 79.0
+                with open(os.path.join(test_dir, f"{d_str}.json"), "w", encoding="utf-8") as f:
+                    json.dump(record, f)
+
+            res = goals.calibrate_adaptive_tdee(test_dir, fallback_tdee=2200.0, window_days=30)
+            self.assertEqual(res["status"], "calibrated")
+            self.assertEqual(res["adaptive_tdee"], 2550)
+            self.assertEqual(res["delta_weight_kg"], -1.0)
+            self.assertEqual(res["days_span"], 14)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,16 @@ class TestSuggestModule(unittest.TestCase):
             self.assertLess(res["score"], 80)
             self.assertTrue(any("运动消耗 200 千卡" in s for s in res["suggestions"]))
 
+            # 校验高密度量化遥测字段与单位
+            self.assertIn("telemetry", res)
+            self.assertEqual(res["telemetry"]["energy"]["consumed_cal"], 1100.0)
+            self.assertEqual(res["telemetry"]["energy"]["target_cal"], 1767)
+            self.assertEqual(res["telemetry"]["energy"]["safety_floor"], 1500)
+            self.assertEqual(res["telemetry"]["macros"]["protein_g"]["actual"], 40.0)
+            self.assertEqual(res["telemetry"]["macros"]["protein_g"]["gap_g"], 93.0)
+            self.assertEqual(res["telemetry"]["quality"]["fiber_g"], 10.0)
+            self.assertEqual(res["telemetry"]["quality"]["fiber_gap_g"], 15.0)
+
     def test_evaluate_day_without_targets(self):
         mock_day_data = {
             "date": "2026-09-07",
@@ -75,6 +85,48 @@ class TestSuggestModule(unittest.TestCase):
             res = suggest.evaluate_day("2026-09-07", targets=None)
             self.assertTrue(any("尚未设置饮食目标档案" in s for s in res["suggestions"]))
             self.assertEqual(res["score"], 100)
+
+    def test_pacing_phase_no_false_alarm(self):
+        # 模拟早餐刚吃完（仅350 kcal），在 pacing 日内进餐模式下不应触发早熟全天扣分
+        mock_breakfast = {
+            "date": "2026-11-20",
+            "totals": {
+                "cal": 350.0,
+                "protein": 20.0,
+                "carb": 40.0,
+                "fat": 10.0,
+                "fiber": 4.0,
+                "sugar": 5.0,
+                "sodium": 300.0,
+                "exercise_cal": 0,
+                "net_cal": 350.0,
+                "status": {
+                    "cal_remaining": 1400.0,
+                    "cal_over": False,
+                    "cal_under": True,
+                    "protein_pct": 15,
+                    "carb_pct": 20,
+                    "fat_pct": 18,
+                },
+                "meal_count": 1,
+            },
+            "meals": [{"meal": "早餐"}],
+            "exercise": [],
+        }
+        targets = {
+            "cal_target": 1750,
+            "safety_floor": 1500,
+            "protein_g_target": 130,
+            "carb_g_target": 180,
+            "fat_g_target": 55,
+        }
+        with patch("app.analyze_day", return_value=mock_breakfast):
+            res = suggest.evaluate_day("2026-11-20", targets=targets, phase="pacing")
+            self.assertEqual(res["phase"], "pacing")
+            self.assertEqual(res["score"], 100)
+            self.assertNotIn("低于生理安全热量底线", res["issues"])
+            self.assertNotIn("热量摄入不足", res["issues"])
+            self.assertTrue(any("日内进度" in s for s in res["suggestions"]))
 
 
 if __name__ == "__main__":

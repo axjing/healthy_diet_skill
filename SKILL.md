@@ -1,135 +1,127 @@
 ---
 name: healthy-diet
-description: 饮食热量记录与营养分析技能。当用户用自然语言描述吃了什么、记录一日三餐、计算摄入热量与营养素、查询食物热量、根据身体指标设置减重/增肌/维持目标、查看每日或区间饮食统计、导出饮食数据、拍照识别食物记录、或询问“今天吃了多少卡/蛋白质够不够/热量超标了吗”时使用。支持自动解析数量、口语单位、烹饪方式、复合菜名消歧与否定排除。
+description: 个人饮食营养记录、热量核算、代谢监测与闭环健康管理的 Agent Skill。当用户描述饮食（口语文字或拍照发图打卡）、记录体重/运动、询问热量预算/营养达标情况、寻求个性化饮食建议、或进行长期闭环代谢调控时使用。
 license: MIT
-compatibility: Python 3.10+, 可选第三方依赖 openai (仅多模态图片识别需要)
+compatibility: Python 3.10+ (100% 标准库，零外部依赖)
 metadata:
-  version: "1.1.0"
+  version: "2.0.0"
   specification: "agentskills.io"
   category: "lifestyle-and-health"
 ---
 
-# 饮食热量记录技能 (Healthy Diet)
+# 饮食健康管理技能 (Healthy Diet)
 
-将用户的自然语言饮食描述解析为结构化食物记录，核算热量与营养素，存入**按日期分文件的本地 JSON 数据**，并提供代谢目标管理、统计分析、健康评估与数据导出。遵循 [Agent Skills 规范](https://agentskills.io)。
+将用户的饮食输入转化为高精度结构化营养数据，按日期分文件原子持久化至本地 JSON，基于物理能量守恒定律核算热量与宏量营养素，并通过闭环生理遥测提供个性化代谢指导。遵循 [Agent Skills 规范](https://agentskills.io)。
 
 ## 渐进式参考文档 (Progressive References)
 
-为保持本指令上下文精简，深度理论与模式定义独立存放于 `references/`，按需查阅：
-- [营养与代谢生理学参考](file:///D:/CODE/healthy_diet_skill/references/nutrition_science.md)：Mifflin-St Jeor 公式、性别最低生理安全底线、g/kg 蛋白质定额、烹饪修正系数表与 WHO 指南。
-- [数据结构与持久化规范](file:///D:/CODE/healthy_diet_skill/references/schema.md)：每日记录 `records/`、用户档案 `settings.json` 与自定义食物 `custom_foods.json` 的 JSON Schema。
-- [记录模板定义](file:///D:/CODE/healthy_diet_skill/assets/record_template.json)：标准饮食记录基础模板。
+为保持本指令上下文精简，深度理论、模式定义与架构设计独立存放，按需查阅：
+- [完整架构与重构设计方案](docs/agent_skill_architecture_plan.md)：系统第一性原理、架构拓扑、全字段量纲定义与端到端演练。
+- [营养与代谢生理学参考](references/nutrition_science.md)：Mifflin-St Jeor 公式、Forbes 闭环代谢自适应模型、质量锚定蛋白质定额、Delta Mass 油脂物理守恒模型。
+- [数据结构与持久化规范](references/schema.md)：每日记录 `records/`、时序总账 `diet_history.csv`、用户档案 `settings.json` 与自定义食物 `custom_foods.json` 的 JSON Schema。
+- [记录模板定义](assets/record_template.json)：标准饮食记录基础模板。
 
-## 数据存放
+---
 
-- 技能数据目录：即本技能所在目录下的 `data/`
-- 每日常规记录：`data/records/<YYYY-MM-DD>.json`（含 `meals` 餐次列表 + `exercise` 运动消耗）
-- 用户自定义食物：`data/custom_foods.json`
-- 用户档案/目标：`data/settings.json`（vision 视觉服务商配置亦存于此文件）
-- 内置食物库：`data/foods.json`（约140种常见食物，每100g可食部营养）
-- 单位/烹饪换算表：`data/units.json`
+## 核心分工原则 (Brain vs. Exoskeleton)
 
-## 快速开始
+| 模块 | 宿主 AI Agent (大脑与感知端) | healthy_diet_skill 引擎 (确定性外骨骼) |
+| :--- | :--- | :--- |
+| **视觉感知** | 用户发食物图片，Agent 多模态视网膜直读分解食材与分量 | 不引入外部视觉 API，避免冗余网络中间层 |
+| **自然语言** | 负责口语、方言、倒装、模糊词与否定排除消歧，提取结构化条目 | 提供结构化 `--items` 优先解析，辅以确定性查表换算 |
+| **物理核算** | 不心算、不瞎猜热量 | Atwater 能量质量守恒 ($4P+4C+9F$) 与 Delta Mass 油脂吸附 |
+| **数据持久化**| 发起 Tool Calling | 按日期本地 JSON 原子写盘，自动同步 `diet_history.csv` |
+| **健康教练** | 结合用户作息、喜好与情绪，生成有温度的个性化指导 | 提供纯数值量化生理遥测向量（`telemetry`）、缺口与评分 |
+| **开放世界** | 库内无食物时，Agent 用世界常识估算并调用 `custom` 注册 | 固化为本地确定性数据，下次直接可查，自愈永不断链 |
 
-```
-# 记住用户档案（性别 体重 身高 年龄 活动量 目标）——用于计算热量目标
-python scripts/app.py profile_init 男 70 175 30 轻度 减重   # 仅当用户给过这些信息时使用
+---
 
-# 记录一餐（自然语言，用逗号分隔多个食物）
-python scripts/app.py add 2026-09-07 "1碗米饭,150克鸡胸肉(煎),1个鸡蛋,清炒西兰花"
+## 快速调用指南 (Quick Start)
 
-# （可选）一拍即记：多模态大模型识别图片中的食物并直接入库
-python scripts/app.py add 2026-09-07 --image lunch.jpg --meal 午餐
+所有命令日期默认均为**今日**，时间默认当前时间：
 
-# 指定餐次/补记时间
-python scripts/app.py add 2026-09-06 "2个鸡蛋,1杯牛奶" --meal 早餐 --ts "2026-09-06 07:30:00"
+```bash
+# 1. 初始化用户身体档案与目标（仅首次或身体指标变化时使用）
+python scripts/app.py profile_init 男 70 175 30 轻度 减重
 
-# 查看某日分析（含热量/营养素/达标情况）
-python scripts/app.py day 2026-09-07 --targets
+# 2. 记录一餐：推荐结构化输入（100% 免疫正则歧义）
+python scripts/app.py record --items '[{"food": "米饭", "amount": 1.5, "unit": "碗"}, {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}]'
 
-# 计算热量目标
-python scripts/app.py goals 男 70 175 30 轻度 减重
+# 2.b 记录一餐：亦支持口语自然语言极简输入
+python scripts/app.py record "1碗半米饭, 150克煎鸡胸肉, 清炒西兰花"
 
-# 健康评估与建议
-python scripts/suggest.py 2026-09-07
-```
+# 3. 记录晨起体重（开启闭环能量代谢自适应遥测）
+python scripts/app.py weight 70.2
 
-## 七大功能模块对应用法
+# 4. 记录运动消耗
+python scripts/app.py exercise 慢跑 30 300
 
-### 1. 饮食记录
-- **自然语言输入**：`add <日期> "<多个食物，逗号分隔>"`。自动解析数量+单位+烹饪方式。
-- **餐次自动分类**：按时间自动归入 早餐/午餐/晚餐/加餐，可用 `--meal` 覆写。
-- **补记**：`--ts "YYYY-MM-DD HH:MM:SS"` 指定时间。
-- **快捷模板**：用户常吃的组合可直接用短语描述，如 "一斤牛肉面"、"两个茶叶蛋"。
-- 支持量词：碗/小碗/大碗/两/斤/克/ml/杯/个/根/块/只/片/份/勺/汤匙/茶匙…
+# 5. 获取高密度生理遥测指标（日内巡航 pacing 或全天结转 auditing）
+python scripts/app.py telemetry
 
-### 2. 热量与营养核算
-- 数量×单位→克，乘以库内每100g营养，再乘以烹饪修正系数（清蒸/煮1.0，清炒1.1，红烧1.35，油炸1.7…）。
-- 输出：千卡、蛋白质、碳水、脂肪、膳食纤维、糖（含天然糖与添加糖总量）、钠。
-- `eval "<描述>"` 可只核算不保存。
-- **自定义食物**：`custom "菜名" <每100g千卡> --protein x --carb x --fat x`，之后可用于记录。
+# 6. 长期闭环自适应能量代谢校准（基于真实进食大账本与体重遥测反推真实 TDEE）
+python scripts/app.py adaptive --days 30
 
-### 3. 统计与分析
-- `range <开始日> <结束日>`：逐日明细 + 区间总量 + 日均。
-- 维度汇总可基于 `day` 输出的餐次 `meal` 字段自行按餐次/类别汇总。
-- 导出后可用 Excel/脚本做趋势图。
-
-### 4. 目标管理
-- `goals 性别 体重 身高 年龄 活动量 目标`：Mifflin-St Jeor 计算 BMR→TDEE，
-  目标 ∈ {减重-500, 减脂-400, 维持0, 增肌+300, 增重+400} kcal，并给出三大营养素目标。
-- `day --targets` 会显示 热量剩余/是否超标、蛋白/碳水/脂肪完成度百分比。
-
-### 5. 数据持久化与管理
-- 按日期分文件，离线可用，可追溯。
-- **修改**：`edit <日期> <餐次索引> --text "新描述"` 或 `--meal 新餐次`。
-- **删除**：`delete <日期> <餐次索引>`（索引从0开始，`day` 输出顺序即索引）。
-- 历史查询：`range` 覆盖任意日期区间；搜索关键词可 grep `data/records/`。
-
-### 6. 热量收支联动
-- **运动记录**：`exercise <日期> "项目" <分钟> <千卡>`（如 `exercise 2026-09-07 跑步 30 300`）。
-- `day` 输出 `exercise_cal` 与 `net_cal = 摄入 - 消耗`。
-- 有消耗时 `suggest.py` 会自动提示净摄入与运动后补充建议。
-
-### 7. 增值辅助
-- **健康评估**：`python scripts/suggest.py <日期>` → 百分制评分 + 问题项 + 针对性建议（热量/蛋白/碳水/脂肪/糖/钠/纤维）。
-- 低卡食谱与营养素建议由技能执行者结合当日欠缺项给出。
-
-### 8. 图片识别（可选，需多模态大模型 API）
-- 先装依赖：`pip install openai`；再配置一次：`python scripts/app.py vision config <qwen|glm|openai> <API_KEY> [--model 模型名]`，`vision list` 查看支持的服务商。
-- 拍照直接记录：`add <日期> --image <图片>`（可留空 text，识别结果自动入库并追加到餐次）。
-- 只识别不入库：`analyze <图片> [--provider 服务商] [--model 模型名]`，`--dry-run` 可预览请求体。
-- 识别输出为结构化描述（如 `1碗米饭，150克鸡胸肉(煎)`），与手输共用同一套解析/换算/烹饪修正引擎，结果格式完全一致。
-- 未配置 Key 时跳过此功能，纯文字记录离线可用。
-
-## 解析规则（重要）
-
-- 分隔符：逗号(,)，中文逗号(，)、分号、顿号、换行。
-- 数字+单位+食物名："2个鸡蛋" → 鸡蛋×2×50g；"150克鸡胸肉" → 150g。
-- 数量后置同样支持："米饭150克"、"鸡蛋2个"。
-- 中文数字："二两米饭"、"半碗粥"、"二十个饺子"均可解析（紧邻单位时才转换，避免误伤"四季豆"类食物名）。
-- 无数字默认1；无单位按该食物常见一份量（优先计数单位 个/块/片，其次 份/碗/杯）。
-- 数量为 0 或负数会被拒绝。
-- 语义否定过滤：自动识别“不要米饭”、“不吃辣”等排除描述，避免误记热量。
-- 未识别项警示：无法识别的食物会通过 `warnings` 与 `unrecognized` 明确反馈，避免静默漏算热量。
-- 烹饪方式写在括号里或紧邻：`鸡胸肉(煎)`、`红烧肉`、`炸鸡` 均识别。
-- 多义词与复合菜肴：支持“西红柿炒鸡蛋”、“牛肉面”这类复合名与智能别名匹配——优先匹配完整菜肴。
-
-## 输出规范
-
-所有统计结果给用户时用**清晰的中文摘要**，例如：
-
-```
-【9月7日 星期四】早餐 · 午餐 · 晚餐
-- 摄入 1,650 千卡 / 目标 1,767（剩 117）
-- 蛋白 85g(64%)  碳水 180g(102%)  脂肪 48g(81%)
-- 钠 1,860mg  糖 12g  膳食纤维 18g
-- 运动消耗 300 千卡，净摄入 1,350 千卡
+# 7. 开放世界自愈：注册库外/自制食品（每100g营养素）
+python scripts/app.py custom "自制黑芝麻糕" 450 --protein 12 --fat 28 --carb 38
 ```
 
-不要向用户dump原始JSON（除非是导出的数据文件）。
+同时支持 Python 原生 SDK 导入直接调用（适合 CodeAct 智能体）：
+```python
+from scripts import app
+res = app.record(items=[{"food": "米饭", "amount": 1, "unit": "碗"}])
+status = app.telemetry()
+```
 
-## 注意
+---
 
-- 索引用 `day` 输出中的顺序；批量修正请用 `edit` 逐条或重录后 `delete`。
-- 数据文件为 UTF-8；Windows 下运行 Python 前建议设置 `PYTHONIOENCODING=utf-8`。
-- 核心功能脚本仅依赖标准库；图片识别（vision 模块）需 `pip install openai`。
+## 典型 Agent 交互与工作流规范
+
+### 1. 饮食打卡场景 (文字或多模态照片)
+1. **用户口语输入**（如“中午吃了一碗半米饭，煎鸡胸肉大概150克，清炒西兰花”）：
+   - Agent 识别食材，组装为结构化条目：
+     `[{"food": "米饭", "amount": 1.5, "unit": "碗"}, {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}, {"food": "西兰花", "amount": 150, "unit": "克", "cooking": "清炒"}]`
+   - Agent 执行调用：`python scripts/app.py record --items '<JSON>'`
+2. **用户发送餐食照片**：
+   - Agent 自身眼睛直接观察图片，辨识出包含的食物、粗估分量与烹饪方式。
+   - 组装为结构化条目后调用 `record`。
+3. **输出给用户的反馈**：
+   - 用清晰的中文向用户汇报：餐次、包含食物、热量、三大宏量、净吸油量（`cooking_oil_g`）。
+
+### 2. 开放世界自愈机制 (Self-Healing Fallback)
+- 当用户吃冷门、外卖特色菜或自制食品时，若调用 `record` 发现 `unrecognized` 列表不为空：
+  1. Agent **不要直接报错放弃**，而是调用自身的营养常识推断该食物每 100g 的合理能量、蛋白、碳水与脂肪。
+  2. Agent 执行 `python scripts/app.py custom "<名称>" <千卡> --protein ... --carb ... --fat ...` 固化沉淀。
+  3. 再次执行 `record` 入库，并向用户提示 `[AI估算]`。
+
+### 3. 日内配速与晚间建议场景
+- 用户询问“今天还剩多少热量？”、“晚餐吃什么？”时：
+  1. 执行 `python scripts/app.py telemetry`。
+  2. 观察返回的 `telemetry.energy.remaining_cal`（剩余热量）、`telemetry.macros.protein_g.gap_g`（蛋白质缺口克数）与 `quality.fiber_gap_g`（纤维缺口）。
+  3. **Agent 自行组织有温度的回答**，例如：“你今天还剩 550 kcal 预算，但全天蛋白质还差 45g。今晚建议安排一块掌心大小的香煎龙利鱼（约200g），再来一大盘白灼西兰花补充纤维……”
+
+### 4. 代谢诊断与闭环校准场景
+- 当用户记录体重满 14~30 天，或困惑“吃得很少为什么体重不掉”时：
+  1. 执行 `python scripts/app.py adaptive --days 30`。
+  2. 读取真实 `empirical_tdee` 与静态 `prior_tdee` 的差异（`metabolic_adaptation_cal`）。
+  3. 解释代谢适应、NEAT 变化，给出科学的破动日（Refeed Day）或热量微调建议。
+
+---
+
+## 物理模型守恒说明
+
+1. **Delta Mass 油脂守恒模型**：
+   烹饪增加的热量 $\Delta E$ 严格 $100\%$ 源自吸附的烹调油（$\Delta m_{\text{oil}} = \Delta E / 9.0\text{ g}$），透明披露 `cooking_oil_g`，原生蛋白质与纤维绝不虚假膨胀。
+2. **生熟水合状态校准**：
+   熟化主食（如“燕麦粥”、“米饭”）与干燥生料（如“燕麦片”、“生大米”）严格区分，绝不产生热量翻倍的荒谬计算。
+3. **质量锚定蛋白质保护**：
+   减脂期蛋白质按体重强制锚定 **$1.9\text{ g/kg}$**，守住去脂体重。
+
+---
+
+## 数据主权与持久化
+
+- **单日明细**：`data/records/<YYYY-MM-DD>.json`（原子替换写入，防并发坏盘）。
+- **终生大账本**：`data/exports/diet_history.csv`（自动同步追加，随时可用 Excel/Pandas 分析）。
+- **数据路径隔离**：支持环境变量 `HEALTHY_DIET_DATA_DIR` 指定任意持久化路径。
+- **运行环境**：100% Python 3.10+ 标准库，零安装依赖，开箱即用。

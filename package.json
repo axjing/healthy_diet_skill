@@ -1,0 +1,49 @@
+{
+  "name": "healthy-diet-skill",
+  "version": "2.0.0",
+  "description": "个人饮食营养记录、热量核算、代谢监测与闭环健康管理 Agent Skill，遵循 agentskills.io 规范",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/axjing/healthy_diet_skill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/axjing/healthy_diet_skill/issues"
+  },
+  "homepage": "https://github.com/axjing/healthy_diet_skill#readme",
+  "keywords": [
+    "agentskills",
+    "agent-skills",
+    "ai-agent",
+    "skills",
+    "claude-code",
+    "cursor",
+    "gemini",
+    "antigravity",
+    "nutrition",
+    "diet",
+    "tdee",
+    "health"
+  ],
+  "bin": {
+    "healthy-diet": "./bin/healthy-diet.js"
+  },
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "bin/",
+    "scripts/",
+    "data/",
+    "references/",
+    "assets/",
+    "docs/"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "pytest -v",
+    "unittest": "python -m unittest discover tests -v"
+  }
+}

@@ -16,16 +16,23 @@ class TestAppModule(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.orig_records_dir = app.RECORDS_DIR
+        self.orig_exports_dir = app.EXPORTS_DIR
+        self.orig_history_csv = app.HISTORY_CSV_PATH
         self.orig_custom_foods = app.CUSTOM_FOODS_PATH
         self.orig_settings = app.SETTINGS_PATH
 
         app.RECORDS_DIR = os.path.join(self.test_dir, "records")
+        app.EXPORTS_DIR = os.path.join(self.test_dir, "exports")
+        app.HISTORY_CSV_PATH = os.path.join(app.EXPORTS_DIR, "diet_history.csv")
         app.CUSTOM_FOODS_PATH = os.path.join(self.test_dir, "custom_foods.json")
         app.SETTINGS_PATH = os.path.join(self.test_dir, "settings.json")
         os.makedirs(app.RECORDS_DIR, exist_ok=True)
+        os.makedirs(app.EXPORTS_DIR, exist_ok=True)
 
     def tearDown(self):
         app.RECORDS_DIR = self.orig_records_dir
+        app.EXPORTS_DIR = self.orig_exports_dir
+        app.HISTORY_CSV_PATH = self.orig_history_csv
         app.CUSTOM_FOODS_PATH = self.orig_custom_foods
         app.SETTINGS_PATH = self.orig_settings
         shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -96,6 +103,58 @@ class TestAppModule(unittest.TestCase):
         res = app.add_meal("2026-09-07", "1份高蛋白能量棒", ts="2026-09-07 15:00:00")
         self.assertTrue(res["ok"])
         self.assertNotIn("warnings", res)
+
+    def test_weight_logging_and_export_sync(self):
+        # 1. 记录饮食并记录体重
+        app.add_meal("2026-09-07", "1碗米饭", ts="2026-09-07 12:00:00")
+        w_res = app.set_weight("2026-09-07", 72.35)
+        self.assertTrue(w_res["ok"])
+        self.assertEqual(w_res["weight"], 72.35)
+
+        # 2. 校验 day 与 analyze_day 读取到体重
+        analysis = app.analyze_day("2026-09-07")
+        self.assertEqual(analysis.get("weight"), 72.35)
+
+        # 3. 校验自动维护的 diet_history.csv 总账文件已存在且写入正确
+        self.assertTrue(os.path.exists(app.HISTORY_CSV_PATH))
+        with open(app.HISTORY_CSV_PATH, encoding="utf-8-sig") as f:
+            content = f.read()
+        self.assertIn("2026-09-07", content)
+        self.assertIn("72.35", content)
+
+    def test_python_sdk_and_structured_record(self):
+        # 1. SDK profile 初始化
+        p_res = app.profile("男", 70.0, 175.0, 30, "轻度", "减重")
+        self.assertTrue(p_res["ok"])
+
+        # 2. SDK record 使用结构化条目
+        items = [
+            {"food": "米饭", "amount": 1, "unit": "碗"},
+            {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}
+        ]
+        r_res = app.record(items, date="2026-09-08", meal="午餐")
+        self.assertTrue(r_res["ok"])
+        self.assertEqual(len(r_res["items"]), 2)
+        self.assertIn("米饭", r_res["text"])
+
+        # 3. SDK weight 记录
+        w_res = app.weight(69.8, date="2026-09-08")
+        self.assertTrue(w_res["ok"])
+        self.assertEqual(w_res["weight"], 69.8)
+
+        # 4. SDK exercise 记录
+        e_res = app.exercise("慢跑", 30, 280, date="2026-09-08")
+        self.assertTrue(e_res["ok"])
+
+        # 5. SDK telemetry 遥测验证
+        tel = app.telemetry("2026-09-08")
+        self.assertEqual(tel["date"], "2026-09-08")
+        self.assertIn("telemetry", tel)
+        self.assertIn("energy", tel["telemetry"])
+        self.assertIn("macros", tel["telemetry"])
+        self.assertIn("quality", tel["telemetry"])
+        self.assertGreater(tel["telemetry"]["energy"]["consumed_cal"], 400.0)
+        self.assertEqual(tel["telemetry"]["energy"]["exercise_cal"], 280.0)
 
 
 if __name__ == "__main__":

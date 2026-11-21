@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""饮食记录应用：持久化、增删改查、统计分析、导出、热量收支联动。
-数据按日期存储在 data/records/<YYYY-MM-DD>.json，用户自定义食物在 data/custom_foods.json。
+"""饮食记录与健康代谢应用核心：确定性持久化、物理守恒核算、时序遥测大账本。
+遵循 agentskills.io 规范，专为赋能 AI Agent 打造的确定性外骨骼引擎。
 """
 import argparse
 import json
@@ -8,18 +8,36 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-import calc
-import goals
-import vision
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CURRENT_DIR not in sys.path:
+    sys.path.insert(0, _CURRENT_DIR)
+
+try:
+    from . import calc, goals
+except (ImportError, ValueError):
+    import calc
+    import goals
+
+# 建议与量化遥测模块
+try:
+    from . import suggest
+except (ImportError, ValueError):
+    try:
+        import suggest
+    except ImportError:
+        suggest = None
 
 # Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RECORDS_DIR = os.path.join(SKILL_DIR, "data", "records")
-CUSTOM_FOODS_PATH = os.path.join(SKILL_DIR, "data", "custom_foods.json")
-SETTINGS_PATH = os.path.join(SKILL_DIR, "data", "settings.json")
+DATA_DIR = os.environ.get("HEALTHY_DIET_DATA_DIR", os.path.join(SKILL_DIR, "data"))
+RECORDS_DIR = os.path.join(DATA_DIR, "records")
+EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
+CUSTOM_FOODS_PATH = os.path.join(DATA_DIR, "custom_foods.json")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+HISTORY_CSV_PATH = os.path.join(EXPORTS_DIR, "diet_history.csv")
 
 MACROS = ["cal", "protein", "carb", "fat", "fiber", "sugar", "sodium"]
 
@@ -32,16 +50,56 @@ def emit(result):
 
 
 def atomic_write_json(path, data):
-    """原子写入 JSON：先写临时文件再 os.replace，避免写一半崩溃或并发写坏数据。"""
+    """原子写入 JSON：采用进程PID与微秒区分临时文件，避免写一半崩溃或并发写坏数据。"""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.tmp"
+    tmp = f"{path}.{os.getpid()}_{datetime.now().strftime('%f')}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
 
+def sync_history_ledger():
+    """全量聚合所有每日 records 生成或更新 data/exports/diet_history.csv 时间序列总账。"""
+    os.makedirs(EXPORTS_DIR, exist_ok=True)
+    if not os.path.exists(RECORDS_DIR):
+        return
+    files = sorted([f for f in os.listdir(RECORDS_DIR) if f.endswith(".json") and len(f) == 15])
+    if not files:
+        return
+    columns = ["date", "cal", "protein", "carb", "fat", "fiber", "sugar", "sodium",
+               "exercise_cal", "net_cal", "weight", "meal_count"]
+    lines = [",".join(columns)]
+    for fname in files:
+        d_str = fname[:-5]
+        day = read_day(d_str)
+        t = day_totals(day)
+        exercise = sum(e.get("cal", 0) for e in day.get("exercise", []))
+        net_cal = round(t["cal"] - exercise, 1)
+        w = day.get("weight", "")
+        row = [
+            d_str,
+            str(t["cal"]),
+            str(t["protein"]),
+            str(t["carb"]),
+            str(t["fat"]),
+            str(t["fiber"]),
+            str(t["sugar"]),
+            str(t["sodium"]),
+            str(round(exercise, 1)),
+            str(net_cal),
+            str(w),
+            str(len(day.get("meals", [])))
+        ]
+        lines.append(",".join(row))
+    tmp = f"{HISTORY_CSV_PATH}.{os.getpid()}_{datetime.now().strftime('%f')}.tmp"
+    with open(tmp, "w", encoding="utf-8-sig") as f:
+        f.write("\n".join(lines))
+    os.replace(tmp, HISTORY_CSV_PATH)
+
+
 def ensure_dirs():
     os.makedirs(RECORDS_DIR, exist_ok=True)
+    os.makedirs(EXPORTS_DIR, exist_ok=True)
 
 
 def load_foods():
@@ -75,6 +133,22 @@ def read_day(d):
 
 def write_day(d, data):
     atomic_write_json(file_path_for(str(d)), data)
+    try:
+        sync_history_ledger()
+    except Exception:
+        pass
+
+
+def set_weight(date_str, weight):
+    """记录某日体重(kg)。"""
+    date_str = validate_date(date_str)
+    w = float(weight)
+    if not (20.0 <= w <= 300.0):
+        raise ValueError(f"体重数值应在 20-300 kg 之间，收到: {weight}")
+    day = read_day(date_str)
+    day["weight"] = round(w, 2)
+    write_day(date_str, day)
+    return {"ok": True, "date": date_str, "weight": round(w, 2)}
 
 
 def normalize_ts(ts):
@@ -101,7 +175,7 @@ VALID_MEALS = {"早餐", "午餐", "晚餐", "加餐"}
 
 
 def add_meal(date_str, description, ts=None, meal_override=None):
-    """新增一餐记录。description 可为食物描述串。返回新增餐次及其明细。"""
+    """新增一餐记录。description 可为食物描述串、结构化列表或 JSON。返回新增餐次及其明细。"""
     date_str = validate_date(date_str)
     foods, _, _ = load_foods()
     _, units, cooking = calc.load_data()
@@ -114,11 +188,36 @@ def add_meal(date_str, description, ts=None, meal_override=None):
     ts = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ts = normalize_ts(ts)
     meal_name = meal_override or meal_classify_hour_str(ts)
+
+    # 规范化记录中的 text 摘要表示
+    if isinstance(description, (list, tuple)):
+        text_desc = ", ".join(
+            f"{it.get('amount','')}{it.get('unit','')}{it.get('food','')}{'('+it['cooking']+')' if it.get('cooking') else ''}"
+            if isinstance(it, dict) else str(it)
+            for it in description
+        )
+    elif isinstance(description, dict) and "items" in description:
+        text_desc = ", ".join(
+            f"{it.get('amount','')}{it.get('unit','')}{it.get('food','')}{'('+it['cooking']+')' if it.get('cooking') else ''}"
+            if isinstance(it, dict) else str(it)
+            for it in description.get("items", [])
+        )
+    elif isinstance(description, str) and (description.strip().startswith("[") or description.strip().startswith("{")):
+        if res.get("items"):
+            text_desc = ", ".join(
+                f"{it.get('amount','')}{it.get('unit','')}{it.get('food','')}{'('+it['cooking']+')' if it.get('cooking') else ''}"
+                for it in res["items"]
+            )
+        else:
+            text_desc = description
+    else:
+        text_desc = str(description)
+
     day = read_day(date_str)
     day["meals"].append({
         "ts": ts,
         "meal": meal_name,
-        "text": description,
+        "text": text_desc,
         "items": res["items"],
         "totals": res["totals"],
     })
@@ -133,7 +232,13 @@ def add_meal(date_str, description, ts=None, meal_override=None):
         for ex in res["excluded"]:
             warnings.append(f"排除项: {ex.get('input')}")
 
-    result = {"ok": True, "meal": meal_name, "totals": res["totals"], "items": res["items"]}
+    result = {
+        "ok": True,
+        "meal": meal_name,
+        "text": text_desc,
+        "totals": res["totals"],
+        "items": res["items"]
+    }
     if warnings:
         result["warnings"] = warnings
     if res.get("unrecognized"):
@@ -168,7 +273,10 @@ def analyze_day(date_str, targets=None):
             "fat_pct": round(t["fat"] / targets["fat_g_target"] * 100),
         }
     t["meal_count"] = len(day.get("meals", []))
-    return {"date": str(date_str), "totals": t, "meals": day.get("meals", []), "exercise": day.get("exercise", [])}
+    res = {"date": str(date_str), "totals": t, "meals": day.get("meals", []), "exercise": day.get("exercise", [])}
+    if "weight" in day:
+        res["weight"] = day["weight"]
+    return res
 
 
 def delete_meal(date_str, index):
@@ -234,6 +342,8 @@ def range_stats(start, end):
             meal_days += 1
         if exercise > 0:
             exercise_days += 1
+        if "weight" in day:
+            t["weight"] = day["weight"]
         rows.append({"date": str(cur), **t})
         cur += timedelta(days=1)
     total = {m: round(sum(r.get(m, 0) for r in rows), 1) for m in MACROS}
@@ -307,6 +417,7 @@ def profile_init(sex, weight, height, age, activity, goal):
     s = load_settings()
     s["profile"] = profile
     save_settings(s)
+    targets["ok"] = True
     return targets
 
 
@@ -318,18 +429,69 @@ def profile_targets():
     return None
 
 
+# ---------------------------------------------------------------------------
+# Python Native SDK 接口（供各类 Agent 框架直接 import 调用）
+# ---------------------------------------------------------------------------
+
+def record(items_or_text, date=None, meal=None, ts=None):
+    """Python SDK: 记录一餐饮食。支持结构化条目列表/JSON或口语文本。"""
+    date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    return add_meal(date_str, items_or_text, ts=ts, meal_override=meal)
+
+
+def telemetry(date=None):
+    """Python SDK: 获取单日生理摄入与高密度量化健康遥测指标。"""
+    date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    prof = load_settings().get("profile")
+    targets = goals.daily_targets(*prof) if prof else None
+    if suggest:
+        return suggest.evaluate_day(date_str, targets)
+    return analyze_day(date_str, targets)
+
+
+def weight(kg, date=None):
+    """Python SDK: 记录体重(kg)。"""
+    date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    return set_weight(date_str, kg)
+
+
+def exercise(item, minutes, cal, date=None):
+    """Python SDK: 记录运动消耗。"""
+    date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    return add_exercise(date_str, item, float(minutes), float(cal))
+
+
+def adaptive(days=30):
+    """Python SDK: 闭环自适应能量代谢校准。"""
+    prof = load_settings().get("profile")
+    fallback = goals.daily_targets(*prof)["tdee"] if prof else 2000.0
+    return goals.calibrate_adaptive_tdee(RECORDS_DIR, fallback_tdee=fallback, window_days=days)
+
+
+def custom(name, cal, protein=0.0, carb=0.0, fat=0.0, fiber=0.0, sugar=0.0, sodium=0.0):
+    """Python SDK: 注册自定义食物。"""
+    return add_custom_food(name, cal, protein, carb, fat, fiber, sugar, sodium)
+
+
+def profile(sex, weight_kg, height_cm, age, activity="轻度", goal="维持"):
+    """Python SDK: 设定身体档案与营养基准。"""
+    return profile_init(sex, weight_kg, height_cm, age, activity, goal)
+
+
+# ---------------------------------------------------------------------------
+# CLI 主入口
+# ---------------------------------------------------------------------------
+
 def main():
     ap = argparse.ArgumentParser(prog="diet")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("add", help="记录一餐，如 diet add 2026-09-07 \"1碗米饭,煎鸡胸肉\"；或 --image 图片识别")
-    p.add_argument("date")
-    p.add_argument("text", nargs="?")
-    p.add_argument("--image")
-    p.add_argument("--provider")
-    p.add_argument("--model")
-    p.add_argument("--meal")
-    p.add_argument("--ts", default=None)
+    p = sub.add_parser("add", aliases=["record"], help="记录一餐，支持自然语言或结构化 JSON：diet record '1碗米饭,煎鸡胸肉' 或 diet record --items '[...]'")
+    p.add_argument("arg1", nargs="?", default=None, help="日期(YYYY-MM-DD)或直接食物描述/JSON")
+    p.add_argument("arg2", nargs="?", default=None, help="食物描述(当arg1为日期时)")
+    p.add_argument("--items", help="结构化条目 JSON 列表，如 '[{\"food\": \"米饭\", \"amount\": 1, \"unit\": \"碗\"}]'")
+    p.add_argument("--meal", choices=sorted(VALID_MEALS), help="餐次覆盖：早餐/午餐/晚餐/加餐")
+    p.add_argument("--ts", default=None, help="补记时间 YYYY-MM-DD HH:MM[:SS]")
 
     p = sub.add_parser("delete", help="删除某日某餐索引")
     p.add_argument("date")
@@ -341,9 +503,12 @@ def main():
     p.add_argument("--text")
     p.add_argument("--meal")
 
-    p = sub.add_parser("day", help="查看某日分析")
-    p.add_argument("date")
+    p = sub.add_parser("day", help="查看某日分析（默认查看今日）")
+    p.add_argument("date", nargs="?", default=None)
     p.add_argument("--targets", action="store_true")
+
+    p = sub.add_parser("telemetry", help="获取当日能量、营养素、达标缺口与量化健康遥测向量（专供 Agent 决策认知）")
+    p.add_argument("date", nargs="?", default=None, help="目标日期，默认今日")
 
     p = sub.add_parser("range", help="区间统计 开始 结束")
     p.add_argument("start")
@@ -357,6 +522,13 @@ def main():
 
     p = sub.add_parser("goals", help="计算热量目标，参数 性别 体重身高 年龄 活动量 目标")
     p.add_argument("args", nargs="*")
+
+    p = sub.add_parser("adaptive", help="闭环代谢自适应遥测：基于历史摄入与体重遥测回归自校准真实 TDEE")
+    p.add_argument("--days", type=int, default=30, help="回溯天数(默认30天)")
+
+    p = sub.add_parser("weight", help="记录体重(kg)：diet weight <数值> 或 diet weight 2026-09-07 <数值>")
+    p.add_argument("arg1", help="体重数值或日期")
+    p.add_argument("arg2", nargs="?", default=None, help="体重数值(当arg1为日期时)")
 
     p = sub.add_parser("profile_init", help="保存档案: 性别 体重 身高 年龄 活动量 目标")
     p.add_argument("sex")
@@ -376,44 +548,42 @@ def main():
     p.add_argument("--sugar", type=float, default=0)
     p.add_argument("--sodium", type=float, default=0)
 
-    p = sub.add_parser("exercise", help="运动记录：日期 项目 分钟 消耗热量")
-    p.add_argument("date")
-    p.add_argument("item")
-    p.add_argument("min", type=float)
-    p.add_argument("cal", type=float)
+    p = sub.add_parser("exercise", help="运动记录：[日期] 项目 分钟 消耗热量，如 diet exercise 跑步 30 300")
+    p.add_argument("arg1", help="日期或运动项目")
+    p.add_argument("arg2", help="运动项目或分钟")
+    p.add_argument("arg3", help="分钟或消耗热量")
+    p.add_argument("arg4", nargs="?", default=None, help="消耗热量(当arg1为日期时)")
 
     p = sub.add_parser("eval", help="计算一条描述")
     p.add_argument("text")
 
-    p = sub.add_parser("analyze", help="识别图片中的食物（不保存），如 diet analyze photo.jpg")
-    p.add_argument("image")
-    p.add_argument("--provider")
-    p.add_argument("--model")
-    p.add_argument("--dry-run", action="store_true", help="只输出将发送的请求体，不实际调用")
-
-    p = sub.add_parser("vision", help="配置/查看图片识别服务商")
-    vp = p.add_subparsers(dest="vision_cmd", required=True)
-    v_list = vp.add_parser("list", help="列出支持的服务商与当前配置")
-    v_cfg = vp.add_parser("config", help="配置服务商 API Key：vision config <provider> <api_key> [--model]")
-    v_cfg.add_argument("provider", choices=list(vision.PROVIDERS.keys()))
-    v_cfg.add_argument("api_key")
-    v_cfg.add_argument("--model")
-
     args = ap.parse_args()
 
-    if args.cmd == "add":
-        description = args.text
-        vision_desc = None
-        if args.image:
-            vision_desc = vision.analyze_image(args.image, provider=args.provider, model=args.model)
-            description = f"{args.text}，{vision_desc}" if args.text else vision_desc
-        if not description:
-            emit({"error": "缺少食物描述或 --image 图片"})
+    if args.cmd in ("add", "record"):
+        target_date = datetime.now().strftime("%Y-%m-%d")
+        description = None
+
+        if args.items:
+            description = args.items
+            if args.arg1:
+                try:
+                    target_date = validate_date(args.arg1)
+                except ValueError:
+                    pass
+        elif args.arg1:
+            try:
+                target_date = validate_date(args.arg1)
+                description = args.arg2
+            except ValueError:
+                description = f"{args.arg1} {args.arg2 or ''}".strip()
+                target_date = datetime.now().strftime("%Y-%m-%d")
         else:
-            res = add_meal(args.date, description, args.ts, args.meal)
-            if vision_desc:
-                res = {"vision": vision_desc, **res}
-            emit(res)
+            description = args.arg2
+
+        if not description:
+            emit({"error": "缺少食物描述或 --items 结构化条目"})
+        else:
+            emit(add_meal(target_date, description, args.ts, args.meal))
     elif args.cmd == "delete":
         emit(delete_meal(args.date, args.index))
     elif args.cmd == "edit":
@@ -422,8 +592,61 @@ def main():
         else:
             emit(edit_meal(args.date, args.index, args.text, args.meal))
     elif args.cmd == "day":
+        target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
         targets = profile_targets() if args.targets else None
-        print(json.dumps(analyze_day(args.date, targets), ensure_ascii=False, indent=2))
+        print(json.dumps(analyze_day(target_date, targets), ensure_ascii=False, indent=2))
+    elif args.cmd == "telemetry":
+        target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
+        profile = load_settings().get("profile")
+        targets = goals.daily_targets(*profile) if profile else None
+        if suggest:
+            emit(suggest.evaluate_day(target_date, targets))
+        else:
+            emit(analyze_day(target_date, targets))
+    elif args.cmd == "exercise":
+        if args.arg4 is not None:
+            ex_date = validate_date(args.arg1)
+            ex_item = args.arg2
+            ex_min = float(args.arg3)
+            ex_cal = float(args.arg4)
+        else:
+            ex_date = datetime.now().strftime("%Y-%m-%d")
+            ex_item = args.arg1
+            ex_min = float(args.arg2)
+            ex_cal = float(args.arg3)
+        emit(add_exercise(ex_date, ex_item, ex_min, ex_cal))
+    elif args.cmd == "delete":
+        emit(delete_meal(args.date, args.index))
+    elif args.cmd == "edit":
+        if args.text is None and not args.meal:
+            emit({"error": "请提供 --text 新描述或 --meal 新餐次"})
+        else:
+            emit(edit_meal(args.date, args.index, args.text, args.meal))
+    elif args.cmd == "day":
+        target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
+        targets = profile_targets() if args.targets else None
+        print(json.dumps(analyze_day(target_date, targets), ensure_ascii=False, indent=2))
+    elif args.cmd == "weight":
+        if args.arg2:
+            target_date = validate_date(args.arg1)
+            try:
+                w_val = float(args.arg2)
+            except ValueError:
+                emit({"error": f"体重数值非法，收到: {args.arg2}"})
+                sys.exit(2)
+        else:
+            try:
+                w_val = float(args.arg1)
+                target_date = datetime.now().strftime("%Y-%m-%d")
+            except ValueError:
+                emit({"error": f"请输入有效的体重数值(kg)，收到: {args.arg1}"})
+                sys.exit(2)
+        emit(set_weight(target_date, w_val))
+    elif args.cmd == "adaptive":
+        profile = load_settings().get("profile")
+        fallback = goals.daily_targets(*profile)["tdee"] if profile else 2000.0
+        res = goals.calibrate_adaptive_tdee(RECORDS_DIR, fallback_tdee=fallback, window_days=args.days)
+        emit(res)
     elif args.cmd == "range":
         s = datetime.strptime(validate_date(args.start), "%Y-%m-%d").date()
         e = datetime.strptime(validate_date(args.end), "%Y-%m-%d").date()

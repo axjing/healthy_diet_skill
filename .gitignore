@@ -5,3 +5,4 @@ __pycache__/
 data/records/
 data/settings.json
 data/custom_foods.json
+data/exports/

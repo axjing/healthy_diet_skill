@@ -162,6 +162,61 @@ class TestAppModule(unittest.TestCase):
         self.assertGreater(tel["telemetry"]["energy"]["consumed_cal"], 400.0)
         self.assertEqual(tel["telemetry"]["energy"]["exercise_cal"], 280.0)
 
+    def test_fitness_peri_workout_and_water(self):
+        # 1. 练前餐与练后餐支持 (含英文别名映射)
+        r_pre = app.add_meal("2026-09-09", "1根香蕉, 1杯黑咖啡", meal_override="pre_workout")
+        self.assertTrue(r_pre["ok"])
+        self.assertEqual(r_pre["meal"], "练前餐")
+
+        r_post = app.add_meal("2026-09-09", "1勺蛋白粉, 1盒即食鸡胸肉", meal_override="练后餐")
+        self.assertTrue(r_post["ok"])
+        self.assertEqual(r_post["meal"], "练后餐")
+
+        # 2. 饮水记录与累加/重设
+        w1 = app.add_water("2026-09-09", 500)
+        self.assertTrue(w1["ok"])
+        self.assertEqual(w1["water_ml"], 500)
+
+        w2 = app.add_water("2026-09-09", 300)
+        self.assertEqual(w2["water_ml"], 800)
+
+        w3 = app.water(200, date="2026-09-09")
+        self.assertEqual(w3["water_ml"], 1000)
+
+        # 3. 单日分析自动探测运动状态与水分汇总
+        analysis = app.analyze_day("2026-09-09")
+        self.assertTrue(analysis["workout_detected"])
+        self.assertEqual(analysis["water_ml"], 1000)
+        self.assertIn("1000 ml", analysis["summary"])
+
+    def test_body_composition_metrics(self):
+        # 多维体形成分记录：体重、体脂率、腰围、骨骼肌
+        w_res = app.set_weight("2026-09-10", 75.0, body_fat_pct=16.0, waist_cm=82.0, muscle_kg=35.0)
+        self.assertTrue(w_res["ok"])
+        self.assertEqual(w_res["body_fat_pct"], 16.0)
+        self.assertEqual(w_res["waist_cm"], 82.0)
+        self.assertEqual(w_res["muscle_kg"], 35.0)
+        # 去脂体重 (LBM) = 75 * (1 - 0.16) = 63.0 kg, 脂肪量 = 12.0 kg
+        self.assertAlmostEqual(w_res["lbm_kg"], 63.0, places=1)
+        self.assertAlmostEqual(w_res["fat_mass_kg"], 12.0, places=1)
+
+        # 验证单日分析回读
+        day_res = app.analyze_day("2026-09-10")
+        self.assertEqual(day_res["weight"], 75.0)
+        self.assertEqual(day_res["body_fat_pct"], 16.0)
+        self.assertEqual(day_res["lbm_kg"], 63.0)
+
+        # 验证 CSV 总账包含体脂率、腰围与骨骼肌
+        with open(app.HISTORY_CSV_PATH, encoding="utf-8-sig") as f:
+            csv_lines = f.readlines()
+        header = csv_lines[0]
+        self.assertIn("body_fat_pct", header)
+        self.assertIn("waist_cm", header)
+        self.assertIn("muscle_kg", header)
+        last_line = csv_lines[-1]
+        self.assertIn("16.0", last_line)
+        self.assertIn("82.0", last_line)
+
 
 if __name__ == "__main__":
     unittest.main()

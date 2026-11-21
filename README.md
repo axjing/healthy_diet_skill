@@ -2,28 +2,15 @@
 
 [![Agent Skills Standard](https://img.shields.io/badge/Agent_Skills-agentskills.io-blue)](https://agentskills.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests: 27 Passed](https://img.shields.io/badge/Tests-27%20Passed-brightgreen)](tests/)
+[![Tests: 35 Passed](https://img.shields.io/badge/Tests-35%20Passed-brightgreen)](tests/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero%20(Stdlib)-success)](scripts/)
 
 专为 AI Agent 打造的确定性生理代谢与饮食健康管理 Agent Skill。将饮食输入（文字描述或多模态照片）转化为高精度结构化营养数据，按日期分文件原子持久化至本地 JSON，基于 Atwater 与 Delta Mass 物理能量质量守恒定律核算热量，并通过 Forbes 闭环自适应能量代谢回归提供量化生理遥测。
 
+针对**增肌减脂普通人群**深度增强：原生内置补剂与健身轻食库、碳水循环与练休周期化目标、训练前后营养时机核验、单餐蛋白质脉冲（MPS）分布、高蛋白时代谢补水监控、多维体形成分（体脂率/腰围/去脂体重）追踪及平台期充碳日（Refeed Day）破局。
+
 本技能遵循 [agentskills.io](https://agentskills.io) 开放标准构建。
-
----
-
-## 核心设计哲学 (First Principles)
-
-1. **Agent 作为大脑与感知端**：
-   - **原生多模态视觉**：用户发来餐食照片，由 Agent 视网膜直读分解食材，**无需配置任何第三方 Vision API Key**，全流程 100% 本地运行。
-   - **语义抽取与消歧**：处理方言、倒装、模糊词与否定排除，将口语提炼为结构化条目。
-   - **开放世界自愈补偿**：遇到冷门食物，由 Agent 凭借世界常识估算并调用 `custom` 动态注册入库。
-   - **动态情境化教练**：结合纯数值遥测指标（`telemetry`），为用户生成个性化、有温度的专业建议。
-2. **Skill 作为外骨骼与确定性物理底座**：
-   - **100% Python 标准库**：零第三方依赖，杜绝环境污染与依赖地狱。
-   - **物理守恒定律**：Delta Mass 烹饪油脂增量模型（外源吸油 $\Delta m_{\text{oil}} = \Delta E / 9.0\text{ g}$），透明披露 `cooking_oil_g`。
-   - **Forbes 闭环能量自适应**：依据真实摄入大账本与体重遥测序列，反推真实物理 TDEE，揭示自适应生热（平台期）。
-   - **绝对可移植性**：无任何硬编码绝对路径，支持 `HEALTHY_DIET_DATA_DIR` 环境变量实现容器与多用户数据隔离。
 
 ---
 
@@ -31,11 +18,12 @@
 
 | 模块 | CLI 命令 | Python SDK 接口 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **饮食记录** | `app.py record [--items '<JSON>']` | `app.record(...)` | 记录饮食，首选结构化 JSON，亦支持自然语言口语 |
-| **生理遥测** | `app.py telemetry [date]` | `app.telemetry(...)` | 获取单日能量、三大宏量缺口克数、油盐与雷达评分 |
-| **体重遥测** | `app.py weight <kg>` | `app.weight(...)` | 记录晨起体重，自动同步全量时序大账本 |
+| **饮食记录** | `app.py record [--items '<JSON>'] [--meal 练前餐/练后餐]` | `app.record(...)` | 记录饮食，支持常用补剂与轻食（蛋白粉、肌酸、即食鸡胸、蛋清等） |
+| **生理遥测** | `app.py telemetry [--workout/--rest]` | `app.telemetry(...)` | 获取单日能量、三大宏量缺口克数、单餐 MPS 亮氨酸脉冲与补水负荷 |
+| **饮水记录** | `app.py water <ml>` | `app.water(...)` | 记录水分摄入，高蛋白时代谢负荷监测与缺口预警 |
+| **体形遥测** | `app.py weight <kg> [--fat %] [--waist cm]` | `app.weight(...)` | 记录体重、体脂率、腰围与骨骼肌，自动解算去脂体重(LBM) |
 | **运动打卡** | `app.py exercise <项目> <分> <卡>` | `app.exercise(...)` | 记录运动消耗，更新生理净热量 |
-| **闭环校准** | `app.py adaptive [--days 30]` | `app.adaptive(...)` | 基于真实进食与体重时序回归自适应 TDEE 与代谢适应 |
+| **闭环校准** | `app.py adaptive [--days 30]` | `app.adaptive(...)` | 7天平滑体重(EWMA)回归真实 TDEE，平台期自动输出 Refeed 充碳方案 |
 | **自愈注册** | `app.py custom <名> <卡> ...` | `app.custom(...)` | 注册库外冷门/自制食品，自愈本地知识图谱 |
 | **身体档案** | `app.py profile_init ...` | `app.profile(...)` | 初始化用户身体生理基准与目标配额 |
 | **时序导出** | `app.py export ...` | `app.history(...)` | 导出时间序列总账 (CSV/JSON) |

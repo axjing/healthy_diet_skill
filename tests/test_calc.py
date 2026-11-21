@@ -174,6 +174,46 @@ class TestCalcEngine(unittest.TestCase):
         self.assertIn("kcal", res["summary"])
         self.assertIn("蛋白质", res["summary"])
 
+    def test_fitness_supplements_and_staples(self):
+        # 1. 健身补剂解析：蛋白粉、肌酸、酪蛋白、鱼油
+        r_whey = calc.compute_item("1勺蛋白粉", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_whey["ok"])
+        self.assertEqual(r_whey["food"], "乳清蛋白粉")
+        self.assertEqual(r_whey["grams"], 30.0)
+        self.assertGreaterEqual(r_whey["values"]["protein"], 24.0)
+
+        r_creatine = calc.compute_item("1勺肌酸", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_creatine["ok"])
+        self.assertEqual(r_creatine["food"], "肌酸")
+        self.assertEqual(r_creatine["grams"], 5.0)
+
+        r_isolate = calc.compute_item("1勺分离乳清蛋白", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_isolate["ok"])
+        self.assertEqual(r_isolate["grams"], 30.0)
+        self.assertGreaterEqual(r_isolate["values"]["protein"], 27.0)
+
+        # 2. 减脂增肌常见便捷食材：即食鸡胸肉、盒装蛋清、希腊酸奶、贝贝南瓜、全麦卷饼
+        r_chicken = calc.compute_item("1盒即食鸡胸肉", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_chicken["ok"])
+        self.assertEqual(r_chicken["grams"], 100.0)
+        self.assertGreaterEqual(r_chicken["values"]["protein"], 24.0)
+
+        r_eggwhite = calc.compute_item("1盒蛋清", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_eggwhite["ok"])
+        self.assertEqual(r_eggwhite["grams"], 500.0)
+
+        r_yogurt = calc.compute_item("1盒希腊酸奶", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(r_yogurt["ok"])
+        self.assertEqual(r_yogurt["grams"], 135.0)
+
+        # 3. 净碳水核算验证 (Net Carb = Carb - Fiber)
+        text = "1条全麦卷饼, 1盒即食鸡胸肉, 1个贝贝南瓜"
+        res = calc.parse_meal(text, self.foods, self.units, self.cooking, self.index)
+        self.assertEqual(len(res["items"]), 3)
+        self.assertIn("net_carb", res["totals"])
+        expected_net_carb = max(0.0, round(res["totals"]["carb"] - res["totals"]["fiber"], 1))
+        self.assertAlmostEqual(res["totals"]["net_carb"], expected_net_carb, delta=0.1)
+
 
 if __name__ == "__main__":
     unittest.main()

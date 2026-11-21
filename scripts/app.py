@@ -67,7 +67,7 @@ def sync_history_ledger():
     if not files:
         return
     columns = ["date", "cal", "protein", "carb", "fat", "fiber", "sugar", "sodium",
-               "exercise_cal", "net_cal", "weight", "meal_count"]
+               "exercise_cal", "net_cal", "weight", "body_fat_pct", "waist_cm", "muscle_kg", "water_ml", "meal_count"]
     lines = [",".join(columns)]
     for fname in files:
         d_str = fname[:-5]
@@ -88,6 +88,10 @@ def sync_history_ledger():
             str(round(exercise, 1)),
             str(net_cal),
             str(w),
+            str(day.get("body_fat_pct", "")),
+            str(day.get("waist_cm", "")),
+            str(day.get("muscle_kg", "")),
+            str(day.get("water_ml", 0.0)),
             str(len(day.get("meals", [])))
         ]
         lines.append(",".join(row))
@@ -129,12 +133,14 @@ def read_day(d):
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
             data.setdefault("units", dict(calc.COMMON_UNITS))
+            data.setdefault("water_ml", 0.0)
             return data
-    return {"date": str(d), "meals": [], "exercise": [], "units": dict(calc.COMMON_UNITS)}
+    return {"date": str(d), "meals": [], "exercise": [], "water_ml": 0.0, "units": dict(calc.COMMON_UNITS)}
 
 
 def write_day(d, data):
     data.setdefault("units", dict(calc.COMMON_UNITS))
+    data.setdefault("water_ml", 0.0)
     atomic_write_json(file_path_for(str(d)), data)
     try:
         sync_history_ledger()
@@ -142,16 +148,61 @@ def write_day(d, data):
         pass
 
 
-def set_weight(date_str, weight):
-    """记录某日体重(kg)。"""
+def set_weight(date_str, weight, body_fat_pct=None, waist_cm=None, muscle_kg=None):
+    """记录某日体重(kg)及体形成分（体脂率%、腰围cm、骨骼肌kg），自动计算去脂体重(LBM)。"""
     date_str = validate_date(date_str)
     w = float(weight)
     if not (20.0 <= w <= 300.0):
         raise ValueError(f"体重数值应在 20-300 kg 之间，收到: {weight}")
     day = read_day(date_str)
     day["weight"] = round(w, 2)
+    res = {"ok": True, "date": date_str, "weight": round(w, 2)}
+    if body_fat_pct is not None:
+        bf = float(body_fat_pct)
+        if not (3.0 <= bf <= 65.0):
+            raise ValueError(f"体脂率数值应在 3%-65% 之间，收到: {body_fat_pct}")
+        day["body_fat_pct"] = round(bf, 1)
+        res["body_fat_pct"] = round(bf, 1)
+        lbm = round(w * (1.0 - bf / 100.0), 2)
+        fat_mass = round(w * (bf / 100.0), 2)
+        day["lbm_kg"] = lbm
+        day["fat_mass_kg"] = fat_mass
+        res["lbm_kg"] = lbm
+        res["fat_mass_kg"] = fat_mass
+    if waist_cm is not None:
+        waist = float(waist_cm)
+        if not (30.0 <= waist <= 200.0):
+            raise ValueError(f"腰围数值应在 30-200 cm 之间，收到: {waist_cm}")
+        day["waist_cm"] = round(waist, 1)
+        res["waist_cm"] = round(waist, 1)
+    if muscle_kg is not None:
+        m_val = float(muscle_kg)
+        if not (10.0 <= m_val <= 150.0):
+            raise ValueError(f"骨骼肌数值应在 10-150 kg 之间，收到: {muscle_kg}")
+        day["muscle_kg"] = round(m_val, 1)
+        res["muscle_kg"] = round(m_val, 1)
     write_day(date_str, day)
-    return {"ok": True, "date": date_str, "weight": round(w, 2)}
+    return res
+
+
+def add_water(date_str, ml, is_absolute=False):
+    """记录某日饮水量(ml)。默认单次累加，is_absolute=True 时直接设定全天总量。"""
+    date_str = validate_date(date_str)
+    val = float(ml)
+    if val < 0 or val > 20000:
+        raise ValueError(f"单次饮水记录数值非法: {ml} ml")
+    day = read_day(date_str)
+    cur = float(day.get("water_ml", 0.0))
+    new_val = val if is_absolute else cur + val
+    day["water_ml"] = round(new_val, 0)
+    write_day(date_str, day)
+    return {
+        "ok": True,
+        "date": date_str,
+        "water_ml": round(new_val, 0),
+        "delta_ml": round(val, 0) if not is_absolute else round(new_val - cur, 0),
+        "units": {"water": "ml"}
+    }
 
 
 def normalize_ts(ts):
@@ -174,7 +225,23 @@ def meal_classify_hour_str(ts):
         return "加餐"
 
 
-VALID_MEALS = {"早餐", "午餐", "晚餐", "加餐"}
+VALID_MEALS = {"早餐", "午餐", "晚餐", "加餐", "练前餐", "练后餐"}
+MEAL_ALIASES = {
+    "pre_workout": "练前餐",
+    "post_workout": "练后餐",
+    "preworkout": "练前餐",
+    "postworkout": "练后餐",
+    "练前": "练前餐",
+    "练后": "练后餐",
+    "加餐": "加餐",
+    "早餐": "早餐",
+    "午餐": "午餐",
+    "晚餐": "晚餐",
+    "breakfast": "早餐",
+    "lunch": "午餐",
+    "dinner": "晚餐",
+    "snack": "加餐",
+}
 
 
 def add_meal(date_str, description, ts=None, meal_override=None):
@@ -186,11 +253,15 @@ def add_meal(date_str, description, ts=None, meal_override=None):
     res = calc.parse_meal(description, foods, units, cooking, index)
     if not res["items"]:
         return {"error": "未能解析任何食物", "parsed": res}
-    if meal_override and meal_override not in VALID_MEALS:
-        return {"error": f"餐次非法，可选值：{','.join(sorted(VALID_MEALS))}", "given": meal_override}
     ts = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ts = normalize_ts(ts)
-    meal_name = meal_override or meal_classify_hour_str(ts)
+    if meal_override:
+        norm_meal = MEAL_ALIASES.get(str(meal_override).strip().lower(), meal_override)
+        if norm_meal not in VALID_MEALS:
+            return {"error": f"餐次非法，可选值：{','.join(sorted(VALID_MEALS))}", "given": meal_override}
+        meal_name = norm_meal
+    else:
+        meal_name = meal_classify_hour_str(ts)
 
     # 规范化记录中的 text 摘要表示
     if isinstance(description, (list, tuple)):
@@ -263,14 +334,28 @@ def day_totals(day):
     return {m: round(v, 1) for m, v in t.items()}
 
 
-def analyze_day(date_str, targets=None):
-    """单日统计 + 达标判定 + 热量收支（运动消耗）+ 健康评估。"""
+def analyze_day(date_str, targets=None, workout_day=None):
+    """单日统计 + 达标判定 + 热量收支（运动消耗）+ 健康评估 + 健身维度（水分/体成分/训练日）。"""
     date_str = validate_date(date_str)
     day = read_day(date_str)
     t = day_totals(day)
     exercise = sum(e.get("cal", 0) for e in day.get("exercise", []))
     t["exercise_cal"] = exercise
     t["net_cal"] = round(t["cal"] - exercise, 1)
+
+    # 自动探测当日是否包含运动消耗或练前/练后餐
+    has_exercise = bool(day.get("exercise"))
+    has_peri_meal = any(m.get("meal") in ("练前餐", "练后餐") for m in day.get("meals", []))
+    workout_detected = has_exercise or has_peri_meal
+
+    if targets is None:
+        prof = load_settings().get("profile")
+        if prof:
+            effective_wk = True if workout_detected else (False if workout_day is False else None)
+            if workout_day is not None:
+                effective_wk = bool(workout_day)
+            targets = goals.daily_targets(*prof, workout_day=effective_wk)
+
     if targets:
         t["status"] = {
             "cal_remaining": round(targets["cal_target"] - t["cal"], 1),
@@ -280,6 +365,7 @@ def analyze_day(date_str, targets=None):
             "protein_pct": round(t["protein"] / targets["protein_g_target"] * 100),
             "carb_pct": round(t["carb"] / targets["carb_g_target"] * 100),
             "fat_pct": round(t["fat"] / targets["fat_g_target"] * 100),
+            "day_type": targets.get("day_type", "standard"),
             "units": {
                 "cal_remaining": "kcal",
                 "protein_pct": "%",
@@ -288,16 +374,20 @@ def analyze_day(date_str, targets=None):
             },
         }
     t["meal_count"] = len(day.get("meals", []))
+    w_val = day.get("water_ml", 0.0)
+    water_summary = f" | 饮水 {w_val:.0f} ml" if w_val > 0 else ""
     res = {
         "date": str(date_str),
         "totals": t,
         "units": dict(calc.COMMON_UNITS),
-        "summary": f"{calc.format_nutrient_summary(t)} | 运动消耗 {exercise:.1f} kcal | 净摄入 {t['net_cal']:.1f} kcal",
+        "summary": f"{calc.format_nutrient_summary(t)} | 运动消耗 {exercise:.1f} kcal | 净摄入 {t['net_cal']:.1f} kcal{water_summary}",
         "meals": day.get("meals", []),
         "exercise": day.get("exercise", []),
+        "workout_detected": workout_detected,
     }
-    if "weight" in day:
-        res["weight"] = day["weight"]
+    for k in ("weight", "body_fat_pct", "waist_cm", "muscle_kg", "lbm_kg", "fat_mass_kg", "water_ml"):
+        if k in day:
+            res[k] = day[k]
     return res
 
 
@@ -318,9 +408,10 @@ def edit_meal(date_str, index, description=None, meal_override=None):
         return {"error": "索引越界"}
     meal = day["meals"][index]
     if meal_override:
-        if meal_override not in VALID_MEALS:
+        norm_meal = MEAL_ALIASES.get(str(meal_override).strip().lower(), meal_override)
+        if norm_meal not in VALID_MEALS:
             return {"error": f"餐次非法，可选值：{','.join(sorted(VALID_MEALS))}", "given": meal_override}
-        meal["meal"] = meal_override
+        meal["meal"] = norm_meal
     if description is not None:
         food, _, c = load_foods()
         _, units, cooking = calc.load_data()
@@ -469,20 +560,34 @@ def record(items_or_text, date=None, meal=None, ts=None):
     return add_meal(date_str, items_or_text, ts=ts, meal_override=meal)
 
 
-def telemetry(date=None):
-    """Python SDK: 获取单日生理摄入与高密度量化健康遥测指标。"""
+def telemetry(date=None, workout_day=None):
+    """Python SDK: 获取单日生理摄入与高密度量化健康遥测指标。支持 workout_day=True/False/None。"""
     date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    day = read_day(date_str)
+    has_exercise = bool(day.get("exercise"))
+    has_peri_meal = any(m.get("meal") in ("练前餐", "练后餐") for m in day.get("meals", []))
+    workout_detected = has_exercise or has_peri_meal
+    effective_wk = True if workout_detected else (False if workout_day is False else None)
+    if workout_day is not None:
+        effective_wk = bool(workout_day)
+
     prof = load_settings().get("profile")
-    targets = goals.daily_targets(*prof) if prof else None
+    targets = goals.daily_targets(*prof, workout_day=effective_wk) if prof else None
     if suggest:
-        return suggest.evaluate_day(date_str, targets)
-    return analyze_day(date_str, targets)
+        return suggest.evaluate_day(date_str, targets, workout_day=effective_wk)
+    return analyze_day(date_str, targets, workout_day=effective_wk)
 
 
-def weight(kg, date=None):
-    """Python SDK: 记录体重(kg)。"""
+def weight(kg, date=None, body_fat_pct=None, waist_cm=None, muscle_kg=None):
+    """Python SDK: 记录体重(kg)及体形成分（体脂率%、腰围cm、骨骼肌kg）。"""
     date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
-    return set_weight(date_str, kg)
+    return set_weight(date_str, kg, body_fat_pct=body_fat_pct, waist_cm=waist_cm, muscle_kg=muscle_kg)
+
+
+def water(ml, date=None, is_absolute=False):
+    """Python SDK: 记录饮水量(ml)。默认单次累加，is_absolute=True 时设定总量。"""
+    date_str = validate_date(date) if date else datetime.now().strftime("%Y-%m-%d")
+    return add_water(date_str, ml, is_absolute=is_absolute)
 
 
 def exercise(item, minutes, cal, date=None):
@@ -536,9 +641,13 @@ def main():
     p = sub.add_parser("day", help="查看某日分析（默认查看今日）")
     p.add_argument("date", nargs="?", default=None)
     p.add_argument("--targets", action="store_true")
+    p.add_argument("--workout", action="store_true", help="按训练日目标核算")
+    p.add_argument("--rest", action="store_true", help="按休息日目标核算")
 
     p = sub.add_parser("telemetry", help="获取当日能量、营养素、达标缺口与量化健康遥测向量（专供 Agent 决策认知）")
     p.add_argument("date", nargs="?", default=None, help="目标日期，默认今日")
+    p.add_argument("--workout", action="store_true", help="按训练日目标核算")
+    p.add_argument("--rest", action="store_true", help="按休息日目标核算")
 
     p = sub.add_parser("range", help="区间统计 开始 结束")
     p.add_argument("start")
@@ -556,9 +665,17 @@ def main():
     p = sub.add_parser("adaptive", help="闭环代谢自适应遥测：基于历史摄入与体重遥测回归自校准真实 TDEE")
     p.add_argument("--days", type=int, default=30, help="回溯天数(默认30天)")
 
-    p = sub.add_parser("weight", help="记录体重(kg)：diet weight <数值> 或 diet weight 2026-09-07 <数值>")
+    p = sub.add_parser("weight", help="记录体重(kg)及体形：diet weight 70.2 或 diet weight 70.2 --fat 18.5 --waist 82")
     p.add_argument("arg1", help="体重数值或日期")
     p.add_argument("arg2", nargs="?", default=None, help="体重数值(当arg1为日期时)")
+    p.add_argument("--fat", "--body-fat", dest="fat", type=float, default=None, help="体脂率(%)")
+    p.add_argument("--waist", type=float, default=None, help="腰围(cm)")
+    p.add_argument("--muscle", type=float, default=None, help="骨骼肌(kg)")
+
+    p = sub.add_parser("water", help="记录饮水量(ml)：diet water 500 或 diet water 2026-09-07 500")
+    p.add_argument("arg1", help="饮水毫升数或日期")
+    p.add_argument("arg2", nargs="?", default=None, help="毫升数(当arg1为日期时)")
+    p.add_argument("--set", action="store_true", help="直接设定全天总量而非增量累加")
 
     p = sub.add_parser("profile_init", help="保存档案: 性别 体重 身高 年龄 活动量 目标")
     p.add_argument("sex")
@@ -623,16 +740,18 @@ def main():
             emit(edit_meal(args.date, args.index, args.text, args.meal))
     elif args.cmd == "day":
         target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
-        targets = profile_targets() if args.targets else None
-        print(json.dumps(analyze_day(target_date, targets), ensure_ascii=False, indent=2))
+        effective_wk = True if args.workout else (False if args.rest else None)
+        targets = goals.daily_targets(*load_settings()["profile"], workout_day=effective_wk) if (args.targets and "profile" in load_settings()) else None
+        print(json.dumps(analyze_day(target_date, targets, workout_day=effective_wk), ensure_ascii=False, indent=2))
     elif args.cmd == "telemetry":
         target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
+        effective_wk = True if args.workout else (False if args.rest else None)
         profile = load_settings().get("profile")
-        targets = goals.daily_targets(*profile) if profile else None
+        targets = goals.daily_targets(*profile, workout_day=effective_wk) if profile else None
         if suggest:
             emit(suggest.evaluate_day(target_date, targets))
         else:
-            emit(analyze_day(target_date, targets))
+            emit(analyze_day(target_date, targets, workout_day=effective_wk))
     elif args.cmd == "exercise":
         if args.arg4 is not None:
             ex_date = validate_date(args.arg1)
@@ -645,17 +764,6 @@ def main():
             ex_min = float(args.arg2)
             ex_cal = float(args.arg3)
         emit(add_exercise(ex_date, ex_item, ex_min, ex_cal))
-    elif args.cmd == "delete":
-        emit(delete_meal(args.date, args.index))
-    elif args.cmd == "edit":
-        if args.text is None and not args.meal:
-            emit({"error": "请提供 --text 新描述或 --meal 新餐次"})
-        else:
-            emit(edit_meal(args.date, args.index, args.text, args.meal))
-    elif args.cmd == "day":
-        target_date = validate_date(args.date) if args.date else datetime.now().strftime("%Y-%m-%d")
-        targets = profile_targets() if args.targets else None
-        print(json.dumps(analyze_day(target_date, targets), ensure_ascii=False, indent=2))
     elif args.cmd == "weight":
         if args.arg2:
             target_date = validate_date(args.arg1)
@@ -671,7 +779,23 @@ def main():
             except ValueError:
                 emit({"error": f"请输入有效的体重数值(kg)，收到: {args.arg1}"})
                 sys.exit(2)
-        emit(set_weight(target_date, w_val))
+        emit(set_weight(target_date, w_val, body_fat_pct=args.fat, waist_cm=args.waist, muscle_kg=args.muscle))
+    elif args.cmd == "water":
+        if args.arg2:
+            target_date = validate_date(args.arg1)
+            try:
+                ml_val = float(args.arg2)
+            except ValueError:
+                emit({"error": f"饮水毫升数非法，收到: {args.arg2}"})
+                sys.exit(2)
+        else:
+            try:
+                ml_val = float(args.arg1)
+                target_date = datetime.now().strftime("%Y-%m-%d")
+            except ValueError:
+                emit({"error": f"请输入有效的饮水毫升数，收到: {args.arg1}"})
+                sys.exit(2)
+        emit(add_water(target_date, ml_val, is_absolute=getattr(args, "set", False)))
     elif args.cmd == "adaptive":
         profile = load_settings().get("profile")
         fallback = goals.daily_targets(*profile)["tdee"] if profile else 2000.0

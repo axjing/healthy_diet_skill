@@ -6,12 +6,18 @@
 
 ## 1. 每日记录文件 (`data/records/<YYYY-MM-DD>.json`)
 
-每日常规记录按日期独立建档，存储餐次明细、运动消耗与体重遥测：
+每日常规记录按日期独立建档，存储餐次明细、运动消耗、补水记录与多维体形成分遥测：
 
 ```json
 {
   "date": "2026-09-07",
   "weight": 70.2,
+  "body_fat_pct": 16.5,
+  "waist_cm": 81.5,
+  "muscle_kg": 34.8,
+  "lbm_kg": 58.6,
+  "fat_mass_kg": 11.6,
+  "water_ml": 2200,
   "units": {
     "cal": "kcal",
     "protein": "g",
@@ -22,99 +28,36 @@
     "sodium": "mg",
     "grams": "g",
     "weight": "kg",
+    "body_fat_pct": "%",
+    "waist_cm": "cm",
+    "muscle_kg": "kg",
+    "lbm_kg": "kg",
+    "fat_mass_kg": "kg",
+    "water": "ml",
     "exercise_cal": "kcal",
     "net_cal": "kcal",
     "duration": "min"
   },
   "meals": [
     {
-      "ts": "2026-09-07 12:30:00",
-      "meal": "午餐",
-      "text": "1碗米饭,150克鸡胸肉(煎)",
-      "summary": "热量 443.0 kcal | 蛋白质 39.9g | 脂肪 14.1g | 碳水 38.8g | 钠 76.8mg",
-      "items": [
-        {
-          "ok": true,
-          "food": "米饭",
-          "matched": "精确",
-          "amount": 1.0,
-          "unit": "碗",
-          "grams": 150.0,
-          "cooking": null,
-          "cooking_factor": 1.0,
-          "values": {
-            "cal": 174.0,
-            "protein": 3.9,
-            "carb": 38.8,
-            "fat": 0.4,
-            "fiber": 0.4,
-            "sugar": 0.0,
-            "sodium": 1.8
-          },
-          "units": {
-            "cal": "kcal",
-            "protein": "g",
-            "carb": "g",
-            "fat": "g",
-            "fiber": "g",
-            "sugar": "g",
-            "sodium": "mg"
-          }
-        },
-        {
-          "ok": true,
-          "food": "鸡胸肉",
-          "matched": "精确",
-          "amount": 150.0,
-          "unit": "克",
-          "grams": 150.0,
-          "cooking": "煎",
-          "cooking_factor": 1.35,
-          "cooking_oil_g": 7.7,
-          "values": {
-            "cal": 269.0,
-            "protein": 36.0,
-            "carb": 0.0,
-            "fat": 13.7,
-            "fiber": 0.0,
-            "sugar": 0.0,
-            "sodium": 75.0
-          },
-          "units": {
-            "cal": "kcal",
-            "protein": "g",
-            "carb": "g",
-            "fat": "g",
-            "fiber": "g",
-            "sugar": "g",
-            "sodium": "mg"
-          }
-        }
-      ],
-      "totals": {
-        "cal": 443.0,
-        "protein": 39.9,
-        "carb": 38.8,
-        "fat": 14.1,
-        "fiber": 0.4,
-        "sugar": 0.0,
-        "sodium": 76.8
-      },
-      "units": {
-        "cal": "kcal",
-        "protein": "g",
-        "carb": "g",
-        "fat": "g",
-        "fiber": "g",
-        "sugar": "g",
-        "sodium": "mg"
-      }
+      "ts": "2026-09-07 16:30:00",
+      "meal": "练前餐",
+      "text": "1根香蕉,1杯黑咖啡",
+      "summary": "热量 95.0 kcal | 蛋白质 1.3g | 脂肪 0.2g | 碳水 24.7g | 钠 1.0mg",
+      "items": [...]
+    },
+    {
+      "ts": "2026-09-07 18:30:00",
+      "meal": "练后餐",
+      "text": "1勺蛋白粉,1盒即食鸡胸肉",
+      "summary": "热量 235.0 kcal | 蛋白质 48.0g | 脂肪 3.0g | 碳水 3.5g | 钠 428.0mg",
+      "items": [...]
     }
   ],
   "exercise": [
     {
-      "item": "慢跑",
-      "min": 30.0,
+      "item": "力量训练",
+      "min": 60.0,
       "cal": 300.0
     }
   ]
@@ -125,12 +68,16 @@
 
 ## 2. 导出时序大账本 (`data/exports/diet_history.csv`)
 
-每次写操作（`add`、`weight`、`exercise` 等）均由 `sync_history_ledger()` 自动增量/全量同步至此 CSV 文件，供长期趋势分析、外部数据管道流转或闭环自适应回归：
+每次写操作（`add`、`weight`、`water`、`exercise` 等）均由 `sync_history_ledger()` 自动增量/全量同步至此 CSV 文件，供长期趋势分析、外部数据管道流转或闭环自适应回归：
 
 | 列名 | 类型 | 说明 |
 | :--- | :--- | :--- |
 | `date` | string | 记录日期 (`YYYY-MM-DD`) |
 | `weight_kg` | float | 当日体重（未记录为空） |
+| `body_fat_pct` | float | 体脂百分比 (%) |
+| `waist_cm` | float | 晨起空腹腰围 (cm) |
+| `muscle_kg` | float | 骨骼肌肉量 (kg) |
+| `water_ml` | int | 当日累计饮水量 (ml) |
 | `cal` | float | 当日摄入总热量 (kcal) |
 | `protein_g` | float | 蛋白质总量 (g) |
 | `carb_g` | float | 碳水化合物总量 (g) |
@@ -147,7 +94,7 @@
 
 ## 3. 用户设置档案 (`data/settings.json`)
 
-存储由 `profile_init` 生成的用户身体指标与 `vision config` 生成的多模态视觉配置：
+存储由 `profile_init` 生成的用户身体指标与偏好配置：
 
 ```json
 {
@@ -156,14 +103,9 @@
     70.0,
     175.0,
     30,
-    "轻度",
+    "中度",
     "减重"
-  ],
-  "vision": {
-    "provider": "qwen",
-    "api_key": "sk-...",
-    "model": "qwen-vl-max"
-  }
+  ]
 }
 ```
 
@@ -204,14 +146,15 @@
 
 | 命令 | 签名与参数 | 说明 |
 | :--- | :--- | :--- |
-| **饮食打卡** | `add [date] <food_text> [meal]` | 日期可选（默认今日），餐次可选（自动推断或默认根据时间） |
-| **体重录入** | `weight [date] <kg>` | 记录当日空腹体重遥测值，触发闭环大账本更新 |
-| **运动打卡** | `exercise [date] <item> <min> <cal>` | 记录运动项目与消耗能量 |
-| **单日报表** | `day [date]` | 获取指定日期的摄入热量、宏量微量营养素及评分建议 |
-| **多日汇总** | `summary <days>` | 获取最近 N 天的历史聚合与趋势数据 |
-| **自适应校准**| `adaptive [--days N]` | 基于历史实际摄入与体重变化闭环校准真实 TDEE 与代谢漂移 |
-| **全量导出** | `export` | 全量更新并输出 `data/exports/diet_history.csv` |
-| **初始画像** | `profile_init <性别> <体重> <身高> <年龄> <活动量> <目标>` | 初始化或更新用户身体指标与默认目标 |
-| **设置目标** | `goal_set <cal> <p> <c> <f> [fiber] [sugar] [sodium]` | 手动指定自定义营养素配额 |
+| **饮食打卡** | `record [date] <food_text> [--meal 餐次] [--items JSON]` | 支持结构化 JSON 或自然语言，餐次支持早餐/午餐/晚餐/加餐/练前餐/练后餐 |
+| **体重录入** | `weight <kg> [--fat %] [--waist cm] [--muscle kg] [--date YYYY-MM-DD]` | 记录晨起体重与体形成分，自动解算去脂体重(LBM)与脂肪量 |
+| **饮水记录** | `water <ml> [--date YYYY-MM-DD] [--set]` | 记录饮水量（默认累加，--set 覆盖），高蛋白代谢负荷预警 |
+| **运动打卡** | `exercise [date] <item> <min> <cal>` | 记录运动项目与消耗能量，更新生理净热量 |
+| **单日报表** | `day [date] [--workout / --rest]` | 查看单日摄入、运动消耗、补水与多维体态，支持训练日/休息日周期化切换 |
+| **生理遥测** | `telemetry [date] [--workout / --rest]` | 输出高密度生理遥测向量（含 MPS 脉冲分布、补水负荷、缺口克数）供 Agent 决策 |
+| **多日汇总** | `range <start> <end>` | 获取指定日期区间的摄入大盘、平均值与运动覆盖率 |
+| **自适应校准**| `adaptive [--days N]` | 基于历史大账本与体重回归真实 TDEE，平台期自动输出 Refeed 充碳日方案 |
+| **全量导出** | `export <start> <end> <out_path> [--format csv/json]` | 导出指定时间范围的详尽大账本 |
+| **初始画像** | `profile_init <性别> <体重> <身高> <年龄> <活动量> <目标>` | 初始化或更新用户身体生理基准与默认目标 |
 | **录入自定义**| `custom <name> <cal> <p> <c> <f> [fiber] [sugar] [sodium]` | 录入个性化包装食品数据 |
 

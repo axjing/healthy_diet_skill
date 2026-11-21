@@ -23,6 +23,7 @@ NUTRIENT_UNITS = {
     "cal": "kcal",
     "protein": "g",
     "carb": "g",
+    "net_carb": "g",
     "fat": "g",
     "fiber": "g",
     "sugar": "g",
@@ -33,6 +34,13 @@ COMMON_UNITS = {
     **NUTRIENT_UNITS,
     "grams": "g",
     "weight": "kg",
+    "body_fat_pct": "%",
+    "waist_cm": "cm",
+    "muscle_kg": "kg",
+    "lbm_kg": "kg",
+    "fat_mass_kg": "kg",
+    "water_ml": "ml",
+    "water": "ml",
     "exercise_cal": "kcal",
     "net_cal": "kcal",
     "duration": "min",
@@ -40,13 +48,16 @@ COMMON_UNITS = {
 
 
 def format_nutrient_summary(totals):
-    """格式化营养数值为带清晰单位的中文摘要，避免歧义。"""
+    """格式化营养数值为带清晰单位的中文摘要，兼顾普通人群与健身控碳人群。"""
     cal = totals.get("cal", 0.0)
     p = totals.get("protein", 0.0)
     f = totals.get("fat", 0.0)
     c = totals.get("carb", 0.0)
+    fib = totals.get("fiber", 0.0)
     s = totals.get("sodium", 0.0)
-    return f"热量 {cal:.1f} kcal | 蛋白质 {p:.1f}g | 脂肪 {f:.1f}g | 碳水 {c:.1f}g | 钠 {s:.1f}mg"
+    net_c = round(max(0.0, c - fib), 1)
+    carb_str = f"碳水 {c:.1f}g(净碳 {net_c:.1f}g)" if fib > 0 else f"碳水 {c:.1f}g"
+    return f"热量 {cal:.1f} kcal | 蛋白质 {p:.1f}g | 脂肪 {f:.1f}g | {carb_str} | 钠 {s:.1f}mg"
 
 DEFAULT_UNITS = [
     "小碗", "大碗", "毫升", "汤匙", "茶匙", "公升", "升", "斤", "两", "克", "公斤",
@@ -298,8 +309,8 @@ def resolve_grams(amount, unit, food, units):
     return None
 
 
-# 这些分类的食物已是成品/半成品（营养值已含烹饪油盐），不再应用烹饪系数
-_PREPARED_CATEGORIES = {"菜肴", "综合/快餐", "零食甜品", "饮品", "调味", "油脂"}
+# 这些分类的食物已是成品/半成品/补剂（营养值已含处理或冲饮），不再应用烹饪系数加成
+_PREPARED_CATEGORIES = {"菜肴", "综合/快餐", "零食甜品", "饮品", "调味", "油脂", "运动补剂"}
 
 # 计数类单位（单个/根/块…），食物 serving 未给出时按食物平均单份重估算
 _PIECE_UNITS = {"个", "颗", "粒", "根", "块", "只", "片", "条", "串", "朵", "段", "把", "个(大)", "个(小)", "根(小)"}
@@ -435,6 +446,8 @@ def compute_item(description, foods, units, cooking, index=None):
             # 蛋白、纤维、钠不随烹调油脂虚假膨胀
             vals[m] = round(raw_val, 1)
 
+    vals["net_carb"] = round(max(0.0, vals.get("carb", 0.0) - vals.get("fiber", 0.0)), 1)
+
     item = {
         "ok": True,
         "food": food["name"],
@@ -522,6 +535,7 @@ def parse_meal(meal_input, foods, units, cooking, index=None):
         for m in MACROS:
             totals[m] += it["values"].get(m, 0)
     totals = {m: round(v, 1) for m, v in totals.items()}
+    totals["net_carb"] = round(max(0.0, totals["carb"] - totals["fiber"]), 1)
     res = {
         "items": items,
         "totals": totals,

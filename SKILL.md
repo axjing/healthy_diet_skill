@@ -11,7 +11,7 @@ metadata:
 
 # 饮食健康管理技能 (Healthy Diet)
 
-将用户的饮食输入转化为高精度结构化营养数据，按日期分文件原子持久化至本地 JSON，基于物理能量守恒定律核算热量与宏量营养素，并通过闭环生理遥测提供个性化代谢指导。遵循 [Agent Skills 规范](https://agentskills.io)。
+将用户的饮食输入转化为高精度结构化营养数据，按日期分文件原子持久化至本地 JSON，基于物理能量守恒定律核算热量与宏量营养素，并通过闭环生理遥测提供个性化代谢指导。针对**增肌减脂普通人群**深度增强：原生内置补剂与健身轻食库、碳水循环与练休周期化目标、训练前后营养时机核验、单餐蛋白质脉冲（MPS）分布、高蛋白时代谢补水监控、多维体形成分（体脂率/腰围/去脂体重）追踪及平台期充碳日（Refeed Day）破局。遵循 [Agent Skills 规范](https://agentskills.io)。
 
 ## 渐进式参考文档 (Progressive References)
 
@@ -42,36 +42,77 @@ metadata:
 
 ```bash
 # 1. 初始化用户身体档案与目标（仅首次或身体指标变化时使用）
-python scripts/app.py profile_init 男 70 175 30 轻度 减重
+python scripts/app.py profile_init 男 70 175 30 中度 减重
 
 # 2. 记录一餐：推荐结构化输入（100% 免疫正则歧义）
 python scripts/app.py record --items '[{"food": "米饭", "amount": 1.5, "unit": "碗"}, {"food": "鸡胸肉", "amount": 150, "unit": "克", "cooking": "煎"}]'
 
-# 2.b 记录一餐：亦支持口语自然语言极简输入
-python scripts/app.py record "1碗半米饭, 150克煎鸡胸肉, 清炒西兰花"
+# 2.b 记录一餐：亦支持口语自然语言极简输入（原生支持补剂与健身轻食）
+python scripts/app.py record "1勺蛋白粉, 1盒即食鸡胸肉, 1个贝贝南瓜"
 
-# 3. 记录晨起体重（开启闭环能量代谢自适应遥测）
-python scripts/app.py weight 70.2
+# 2.c 记录练前餐或练后餐（精准把握合成窗口）
+python scripts/app.py record "1根香蕉, 1杯黑咖啡" --meal 练前餐
+python scripts/app.py record "1勺蛋白粉, 1盒即食鸡胸肉" --meal 练后餐
 
-# 4. 记录运动消耗
-python scripts/app.py exercise 慢跑 30 300
+# 3. 记录晨起体重与体形成分（开启闭环能量代谢自适应遥测）
+python scripts/app.py weight 70.2 --fat 16.5 --waist 81.5 --muscle 34.8
 
-# 5. 获取高密度生理遥测指标（日内巡航 pacing 或全天结转 auditing）
-python scripts/app.py telemetry
+# 4. 记录饮水量（高蛋白饮食代谢与肌肉饱满度关键守护）
+python scripts/app.py water 500
 
-# 6. 长期闭环自适应能量代谢校准（基于真实进食大账本与体重遥测反推真实 TDEE）
+# 5. 记录运动消耗
+python scripts/app.py exercise 力量训练 60 300
+
+# 6. 获取高密度生理遥测指标（支持 --workout 训练日高碳 或 --rest 休息日低碳）
+python scripts/app.py telemetry --workout
+
+# 7. 长期闭环自适应能量代谢校准（自适应回归真实 TDEE，平台期自动输出 Refeed 充碳日方案）
 python scripts/app.py adaptive --days 30
 
-# 7. 开放世界自愈：注册库外/自制食品（每100g营养素）
+# 8. 开放世界自愈：注册库外/自制食品（每100g营养素）
 python scripts/app.py custom "自制黑芝麻糕" 450 --protein 12 --fat 28 --carb 38
 ```
 
 同时支持 Python 原生 SDK 导入直接调用（适合 CodeAct 智能体）：
 ```python
 from scripts import app
-res = app.record(items=[{"food": "米饭", "amount": 1, "unit": "碗"}])
-status = app.telemetry()
+
+# 记录健身餐与补水
+res = app.record(items=[{"food": "乳清蛋白粉", "amount": 1, "unit": "勺"}], meal="练后餐")
+app.water(500)
+app.weight(70.2, body_fat_pct=16.5, waist_cm=81.5)
+
+# 周期化遥测（训练日 / 休息日）
+status = app.telemetry(workout_day=True)
+print(f"有效单餐亮氨酸脉冲数: {status['telemetry']['mps']['actual_pulses']}")
+print(f"补水完成度: {status['telemetry']['hydration']['pct']}%")
 ```
+
+---
+
+## 增肌减脂普通人群实战工作流
+
+### 1. 补剂与便捷轻食录入
+内置标准健身补剂与轻食专属换算：
+- 补剂支持：`1勺蛋白粉` (30g/24g蛋白)、`1勺分离乳清`、`1勺酪蛋白`、`1勺肌酸` (5g)、`1勺BCAA` (7g)、`1粒鱼油` (1g)。
+- 便捷轻食：`1盒即食鸡胸肉` (100g/24g蛋白)、`1盒蛋清` (500g/55g蛋白)、`1盒希腊酸奶` (135g/13.5g蛋白)、`1罐金枪鱼` (100g)、`1条全麦卷饼` (50g)、`1个贝贝南瓜` (300g)。
+
+### 2. 碳水循环周期化管理 (Carb Cycling)
+- **训练日 (Workout Day)**：高碳水、低脂肪、高蛋白。充足肌糖原保障大重量抗阻训练的爆发力与充血感，收窄热量赤字。
+- **休息日 (Rest Day)**：低碳水、健康脂肪、维持高蛋白。下调主食配额，适度提高优质脂肪以维持内分泌与睾酮激素稳定，扩大减脂热量赤字。
+
+### 3. 营养摄入时机与单餐蛋白脉冲 (Nutrient Timing & MPS)
+- **练前餐**：严格质检脂肪含量（`fat <= 10~15g`），防止因胃排空延迟导致胃胀充血，提醒补充适量快/中速碳水。
+- **练后餐**：质检蛋白质阈值（`protein >= 20~35g`），确保训练后 1~2 小时内充分启动肌肉蛋白合成黄金窗口。
+- **单餐蛋白脉冲 (MPS Pulse)**：根据体重测算亮氨酸激活阈值（$0.35\text{ g/kg}$，单餐 $\ge 20\text{g}$），督促将全天蛋白质均匀分散在 3~4 餐，杜绝“一餐暴食蛋白、另几餐毫无蛋白”的低效合成。
+
+### 4. 高蛋白时代谢补水监控 (Hydration)
+- 摄入 $>1.6\sim 2.0\text{ g/kg}$ 蛋白质会显著提升肾脏尿素与溶质排泄负担。
+- 自动按体重与训练消耗测算最低需水量（$35\text{ ml/kg} + \text{运动消耗水}$），高蛋白而饮水不足时自动扣分并高危预警。
+
+### 5. 多维体形成分与平台期充碳日 (Body Composition & Refeed)
+- **过滤水潴留假象**：追踪体脂率（%）、腰围（cm）、去脂体重（LBM）与 7 天指数平滑均线（EWMA），避免用户因高碳日糖原结合水分（1g糖原带3~4g水）而盲目恐慌。
+- **充碳日破局 (Refeed Day)**：连续处于减脂赤字且体重停滞时，自适应引擎自动识别代谢平台期，给出单日维持热量、高碳低脂充碳方案，促进下调的瘦素（Leptin）与甲状腺素 T3 敏感度回升。
 
 ---
 

@@ -77,6 +77,57 @@ class TestGoalsModule(unittest.TestCase):
             self.assertEqual(res["adaptive_tdee"], 2550)
             self.assertEqual(res["delta_weight_kg"], -1.0)
             self.assertEqual(res["days_span"], 14)
+            self.assertIn("trend_weight_kg", res)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_carb_cycling_targets(self):
+        # 1. 默认调用返回标准目标，同时附带 workout_targets 与 rest_targets 供周期化调度
+        std = goals.daily_targets("男", 70, 175, 30, activity="中度", goal="减重")
+        self.assertEqual(std["day_type"], "standard")
+        self.assertIn("workout_targets", std)
+        self.assertIn("rest_targets", std)
+
+        # 2. 训练日目标 (workout_day=True)：高碳、温和热量赤字
+        wk = goals.daily_targets("男", 70, 175, 30, activity="中度", goal="减重", workout_day=True)
+        self.assertEqual(wk["day_type"], "workout")
+        self.assertGreater(wk["carb_g_target"], std["carb_g_target"])
+        self.assertGreater(wk["cal_target"], std["cal_target"])
+        self.assertAlmostEqual(wk["protein_g_per_kg"], 1.9, delta=0.05)
+
+        # 3. 休息日目标 (workout_day=False)：低碳、优质脂肪、维持高蛋白
+        rst = goals.daily_targets("男", 70, 175, 30, activity="中度", goal="减重", workout_day=False)
+        self.assertEqual(rst["day_type"], "rest")
+        self.assertLess(rst["carb_g_target"], std["carb_g_target"])
+        self.assertLess(rst["cal_target"], wk["cal_target"])
+        self.assertGreater(rst["fat_g_target"], wk["fat_g_target"])
+        self.assertAlmostEqual(rst["protein_g_per_kg"], 1.9, delta=0.05)
+
+    def test_trend_weight_and_plateau_refeed(self):
+        import tempfile
+        import shutil
+        test_dir = tempfile.mkdtemp()
+        try:
+            from datetime import datetime, timedelta
+            base_date = datetime.now() - timedelta(days=16)
+            # 模拟连续 14 天体重停滞在 75.0kg 且卡路里持续处于 1600 kcal 减脂赤字
+            for i in range(16):
+                d_str = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
+                record = {
+                    "date": d_str,
+                    "weight": 75.0,
+                    "meals": [{"totals": {"cal": 1600.0}}],
+                    "exercise": [],
+                }
+                with open(os.path.join(test_dir, f"{d_str}.json"), "w", encoding="utf-8") as f:
+                    json.dump(record, f)
+
+            res = goals.calibrate_adaptive_tdee(test_dir, fallback_tdee=2200.0, window_days=21)
+            self.assertEqual(res["status"], "calibrated")
+            self.assertTrue(res["plateau_detected"])
+            self.assertTrue(res["refeed_recommended"])
+            self.assertIn("refeed_strategy", res)
+            self.assertIn("充碳", res["refeed_strategy"]["title"])
         finally:
             shutil.rmtree(test_dir, ignore_errors=True)
 

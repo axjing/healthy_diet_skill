@@ -12,11 +12,26 @@
 {
   "date": "2026-09-07",
   "weight": 70.2,
+  "units": {
+    "cal": "kcal",
+    "protein": "g",
+    "carb": "g",
+    "fat": "g",
+    "fiber": "g",
+    "sugar": "g",
+    "sodium": "mg",
+    "grams": "g",
+    "weight": "kg",
+    "exercise_cal": "kcal",
+    "net_cal": "kcal",
+    "duration": "min"
+  },
   "meals": [
     {
       "ts": "2026-09-07 12:30:00",
       "meal": "午餐",
       "text": "1碗米饭,150克鸡胸肉(煎)",
+      "summary": "热量 443.0 kcal | 蛋白质 39.9g | 脂肪 14.1g | 碳水 38.8g | 钠 76.8mg",
       "items": [
         {
           "ok": true,
@@ -35,6 +50,15 @@
             "fiber": 0.4,
             "sugar": 0.0,
             "sodium": 1.8
+          },
+          "units": {
+            "cal": "kcal",
+            "protein": "g",
+            "carb": "g",
+            "fat": "g",
+            "fiber": "g",
+            "sugar": "g",
+            "sodium": "mg"
           }
         },
         {
@@ -55,6 +79,15 @@
             "fiber": 0.0,
             "sugar": 0.0,
             "sodium": 75.0
+          },
+          "units": {
+            "cal": "kcal",
+            "protein": "g",
+            "carb": "g",
+            "fat": "g",
+            "fiber": "g",
+            "sugar": "g",
+            "sodium": "mg"
           }
         }
       ],
@@ -66,6 +99,15 @@
         "fiber": 0.4,
         "sugar": 0.0,
         "sodium": 76.8
+      },
+      "units": {
+        "cal": "kcal",
+        "protein": "g",
+        "carb": "g",
+        "fat": "g",
+        "fiber": "g",
+        "sugar": "g",
+        "sodium": "mg"
       }
     }
   ],

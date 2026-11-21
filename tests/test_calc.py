@@ -158,6 +158,22 @@ class TestCalcEngine(unittest.TestCase):
         self.assertEqual(res2["items"][0]["grams"], 100.0)
         self.assertEqual(res2["items"][0]["cooking_factor"], 1.0)
 
+    def test_units_and_summary_metadata(self):
+        res = calc.parse_meal("1碗米饭, 100克牛肉冬瓜汤", self.foods, self.units, self.cooking, self.index)
+        self.assertTrue(res["items"])
+        # 验证每个 item 包含明确单位映射
+        for it in res["items"]:
+            self.assertIn("units", it)
+            self.assertEqual(it["units"]["cal"], "kcal")
+            self.assertEqual(it["units"]["protein"], "g")
+            self.assertEqual(it["units"]["sodium"], "mg")
+        # 验证返回顶层包含 units 与格式化中文 summary
+        self.assertIn("units", res)
+        self.assertEqual(res["units"]["cal"], "kcal")
+        self.assertIn("summary", res)
+        self.assertIn("kcal", res["summary"])
+        self.assertIn("蛋白质", res["summary"])
+
 
 if __name__ == "__main__":
     unittest.main()

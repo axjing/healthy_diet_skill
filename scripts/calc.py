@@ -19,6 +19,35 @@ if hasattr(sys.stdout, "reconfigure"):
 
 MACROS = ["cal", "protein", "carb", "fat", "fiber", "sugar", "sodium"]
 
+NUTRIENT_UNITS = {
+    "cal": "kcal",
+    "protein": "g",
+    "carb": "g",
+    "fat": "g",
+    "fiber": "g",
+    "sugar": "g",
+    "sodium": "mg",
+}
+
+COMMON_UNITS = {
+    **NUTRIENT_UNITS,
+    "grams": "g",
+    "weight": "kg",
+    "exercise_cal": "kcal",
+    "net_cal": "kcal",
+    "duration": "min",
+}
+
+
+def format_nutrient_summary(totals):
+    """格式化营养数值为带清晰单位的中文摘要，避免歧义。"""
+    cal = totals.get("cal", 0.0)
+    p = totals.get("protein", 0.0)
+    f = totals.get("fat", 0.0)
+    c = totals.get("carb", 0.0)
+    s = totals.get("sodium", 0.0)
+    return f"热量 {cal:.1f} kcal | 蛋白质 {p:.1f}g | 脂肪 {f:.1f}g | 碳水 {c:.1f}g | 钠 {s:.1f}mg"
+
 DEFAULT_UNITS = [
     "小碗", "大碗", "毫升", "汤匙", "茶匙", "公升", "升", "斤", "两", "克", "公斤",
     "碗", "碟", "盘", "份", "人份", "小份", "中份", "大份", "勺", "杯", "瓶", "罐",
@@ -416,6 +445,7 @@ def compute_item(description, foods, units, cooking, index=None):
         "cooking": cook if factor != 1.0 else None,
         "cooking_factor": factor,
         "values": vals,
+        "units": dict(NUTRIENT_UNITS),
     }
     if delta_fat > 0:
         item["cooking_oil_g"] = delta_fat
@@ -492,7 +522,12 @@ def parse_meal(meal_input, foods, units, cooking, index=None):
         for m in MACROS:
             totals[m] += it["values"].get(m, 0)
     totals = {m: round(v, 1) for m, v in totals.items()}
-    res = {"items": items, "totals": totals}
+    res = {
+        "items": items,
+        "totals": totals,
+        "units": dict(NUTRIENT_UNITS),
+        "summary": format_nutrient_summary(totals),
+    }
     if unrecognized:
         res["unrecognized"] = unrecognized
     if excluded:

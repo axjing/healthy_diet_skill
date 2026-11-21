@@ -127,11 +127,14 @@ def read_day(d):
     p = file_path_for(str(d))
     if os.path.exists(p):
         with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    return {"date": str(d), "meals": [], "exercise": []}
+            data = json.load(f)
+            data.setdefault("units", dict(calc.COMMON_UNITS))
+            return data
+    return {"date": str(d), "meals": [], "exercise": [], "units": dict(calc.COMMON_UNITS)}
 
 
 def write_day(d, data):
+    data.setdefault("units", dict(calc.COMMON_UNITS))
     atomic_write_json(file_path_for(str(d)), data)
     try:
         sync_history_ledger()
@@ -213,13 +216,16 @@ def add_meal(date_str, description, ts=None, meal_override=None):
     else:
         text_desc = str(description)
 
+    meal_summary = res.get("summary") or calc.format_nutrient_summary(res["totals"])
     day = read_day(date_str)
     day["meals"].append({
         "ts": ts,
         "meal": meal_name,
         "text": text_desc,
+        "summary": meal_summary,
         "items": res["items"],
         "totals": res["totals"],
+        "units": dict(calc.NUTRIENT_UNITS),
     })
     write_day(date_str, day)
     warnings = []
@@ -236,7 +242,9 @@ def add_meal(date_str, description, ts=None, meal_override=None):
         "ok": True,
         "meal": meal_name,
         "text": text_desc,
+        "summary": meal_summary,
         "totals": res["totals"],
+        "units": dict(calc.NUTRIENT_UNITS),
         "items": res["items"]
     }
     if warnings:
@@ -266,14 +274,28 @@ def analyze_day(date_str, targets=None):
     if targets:
         t["status"] = {
             "cal_remaining": round(targets["cal_target"] - t["cal"], 1),
+            "cal_remaining_unit": "kcal",
             "cal_over": t["cal"] > targets["cal_target"] * 1.05,
             "cal_under": t["cal"] < targets["cal_target"] * 0.85,
             "protein_pct": round(t["protein"] / targets["protein_g_target"] * 100),
             "carb_pct": round(t["carb"] / targets["carb_g_target"] * 100),
             "fat_pct": round(t["fat"] / targets["fat_g_target"] * 100),
+            "units": {
+                "cal_remaining": "kcal",
+                "protein_pct": "%",
+                "carb_pct": "%",
+                "fat_pct": "%",
+            },
         }
     t["meal_count"] = len(day.get("meals", []))
-    res = {"date": str(date_str), "totals": t, "meals": day.get("meals", []), "exercise": day.get("exercise", [])}
+    res = {
+        "date": str(date_str),
+        "totals": t,
+        "units": dict(calc.COMMON_UNITS),
+        "summary": f"{calc.format_nutrient_summary(t)} | 运动消耗 {exercise:.1f} kcal | 净摄入 {t['net_cal']:.1f} kcal",
+        "meals": day.get("meals", []),
+        "exercise": day.get("exercise", []),
+    }
     if "weight" in day:
         res["weight"] = day["weight"]
     return res
@@ -363,7 +385,15 @@ def range_stats(start, end):
         "days_with_meals": meal_days,
         "days_with_exercise": exercise_days,
     }
-    return {"start": str(start), "end": str(end), "meta": meta, "rows": rows, "total": total, "avg": avg}
+    return {
+        "start": str(start),
+        "end": str(end),
+        "meta": meta,
+        "rows": rows,
+        "total": total,
+        "avg": avg,
+        "units": dict(calc.COMMON_UNITS),
+    }
 
 
 def to_csv(rows, path):

@@ -60,6 +60,12 @@ class TestAppModule(unittest.TestCase):
         day = app.read_day("2026-09-07")
         self.assertEqual(len(day["meals"]), 1)
         self.assertEqual(day["meals"][0]["meal"], "午餐")
+        self.assertIn("units", res)
+        self.assertIn("summary", res)
+        self.assertIn("units", day)
+        self.assertEqual(day["units"]["cal"], "kcal")
+        self.assertIn("units", day["meals"][0])
+        self.assertIn("summary", day["meals"][0])
 
     def test_edit_and_delete_meal(self):
         app.add_meal("2026-09-07", "1碗米饭", ts="2026-09-07 12:00:00")

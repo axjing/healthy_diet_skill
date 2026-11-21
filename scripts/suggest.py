@@ -10,9 +10,10 @@ if _CURRENT_DIR not in sys.path:
     sys.path.insert(0, _CURRENT_DIR)
 
 try:
-    from . import app, goals
+    from . import app, calc, goals
 except (ImportError, ValueError):
     import app
+    import calc
     import goals
 
 # Windows 控制台默认 gbk，设为 utf-8 以避免中文输出乱码
@@ -45,6 +46,18 @@ def build_telemetry(t, targets, st):
     net_cal = t.get("net_cal", cal_actual)
 
     return {
+        "units": {
+            "energy": "kcal",
+            "protein": "g",
+            "carb": "g",
+            "fat": "g",
+            "fiber": "g",
+            "sugar": "g",
+            "sodium": "mg",
+            "cooking_oil": "g",
+            "exercise": "kcal",
+            "net_energy": "kcal",
+        },
         "energy": {
             "consumed_cal": cal_actual,
             "target_cal": cal_target,
@@ -121,6 +134,7 @@ def evaluate_day(date_str, targets=None, phase=None):
             "issues": issues,
             "status": st,
             "telemetry": telemetry,
+            "units": dict(calc.COMMON_UNITS),
             "suggestions": suggestions,
         }
 
@@ -133,24 +147,24 @@ def evaluate_day(date_str, targets=None, phase=None):
         # 仅对已实际发生且超标的行为预警与扣分，不扣除“尚未吃够”的假扣分
         if st.get("cal_over"):
             issues.append("热量已提前超标")
-            suggestions.append(f"今日热量已达 {t['cal']:.0f} kcal，提前超出全天预算，后续餐次请严格控制油脂主食，选择无油绿叶蔬菜。")
+            suggestions.append(f"【热量超标预警】今日热量已达 {t['cal']:.0f} kcal，提前超出全天预算（超出 {abs(rem_cal):.0f} kcal），后续餐次请严格控制油脂主食，选择无油绿叶蔬菜。")
             score -= 25
 
         if t.get("sugar", 0) > 50:
             issues.append("糖摄入偏多")
-            suggestions.append("今日统计游离糖分已偏多，后续请避免含糖饮料、奶茶与甜点。")
+            suggestions.append(f"【添加糖过量】今日累计游离糖已达 {t.get('sugar', 0):.1f}g（建议上限 50.0g），后续请避免含糖饮料、奶茶与甜点。")
             score -= 10
 
         if t.get("sodium", 0) > 2000:
             issues.append("钠摄入过多")
-            suggestions.append("今日累计钠已超 2000mg，后续餐次注意减盐清淡，多喝水促进代谢。")
+            suggestions.append(f"【钠摄入超标】今日累计钠已达 {t.get('sodium', 0):.0f} mg（参考上限 2000.0 mg），后续餐次注意减盐清淡，多喝水促进代谢。")
             score -= 10
 
         # 正向配额导航建议
         suggestions.insert(0, f"【日内进度】今日已摄入 {t['cal']:.0f} kcal / 目标 {targets['cal_target']} kcal"
                               f"（尚余 {rem_cal:.0f} kcal 预算，已完成 {round(t['cal'] / targets['cal_target'] * 100)}%）。")
         if rem_protein > 5:
-            suggestions.append(f"【下餐配额提示】全天蛋白质尚差 {rem_protein:.0f}g 达标，下一餐建议优先安排掌心大小的瘦肉/鱼虾或蛋奶豆制品。")
+            suggestions.append(f"【下餐配额提示】全天蛋白质尚差 {rem_protein:.0f}g 达标（已摄入 {t['protein']:.1f}g / 目标 {targets['protein_g_target']}g），下一餐建议优先安排掌心大小的瘦肉/鱼虾或蛋奶豆制品。")
 
         if t.get("exercise_cal"):
             suggestions.append(f"今日运动消耗 {t['exercise_cal']:.0f} 千卡，净摄入 {t['net_cal']:.0f} 千卡。")
@@ -163,6 +177,7 @@ def evaluate_day(date_str, targets=None, phase=None):
             "issues": issues,
             "status": st,
             "telemetry": telemetry,
+            "units": dict(calc.COMMON_UNITS),
             "suggestions": suggestions,
         }
 
@@ -172,50 +187,55 @@ def evaluate_day(date_str, targets=None, phase=None):
     # 维度 1：能量平衡度 (25分)
     if st.get("cal_over"):
         issues.append("热量超标")
-        suggestions.append("今日热量超标，下一餐可选择低卡高纤食物，如绿叶蔬菜、清汤，并将主食减半。")
+        diff = round(t["cal"] - targets["cal_target"], 1)
+        suggestions.append(f"【热量超标】今日热量超标：实际摄入 {t['cal']:.0f} kcal，超出目标 ({targets['cal_target']} kcal) 达 {diff} kcal。下一餐可选择低卡高纤食物（如绿叶蔬菜、清汤），并将主食减半。")
         score -= 25
     elif st.get("cal_under"):
         issues.append("热量摄入不足")
-        suggestions.append("今日热量不足，建议补充优质蛋白和复合碳水，如鸡胸肉、全麦面包、牛奶。")
+        diff = round(targets["cal_target"] - t["cal"], 1)
+        suggestions.append(f"【热量摄入不足】今日热量不足：实际摄入 {t['cal']:.0f} kcal，距离目标 ({targets['cal_target']} kcal) 尚缺 {diff} kcal（完成度 {round(t['cal'] / targets['cal_target'] * 100)}%）。建议补充优质蛋白和复合碳水，如鸡胸肉、全麦面包、牛奶。")
         score -= 10
 
     if "safety_floor" in targets and t.get("cal", 0) < targets["safety_floor"]:
         issues.append("低于生理安全热量底线")
-        suggestions.append(f"今日热量摄入低于生理安全底线 ({targets['safety_floor']} kcal)，长期过低易引起代谢适应与肌肉流失，建议温和制造缺口。")
+        floor_gap = round(targets["safety_floor"] - t.get("cal", 0), 1)
+        suggestions.append(f"【低于生理安全底线】今日热量摄入 ({t['cal']:.0f} kcal) 低于生理安全底线 ({targets['safety_floor']} kcal)，缺口达 {floor_gap} kcal。长期过低易引起代谢适应与肌肉流失，建议温和制造缺口。")
         score -= 10
 
     # 维度 2：蛋白质与宏量平衡 (25分)
     if "protein_pct" in st:
         if st["protein_pct"] < 60:
             issues.append("蛋白质偏低")
-            suggestions.append("蛋白质摄入不足，可增加蛋、奶、鸡胸肉、鱼虾或豆制品。")
+            p_gap = round(max(0.0, targets["protein_g_target"] - t["protein"]), 1)
+            suggestions.append(f"【蛋白质偏低】蛋白质摄入不足：全天仅摄入 {t['protein']:.1f}g，达到目标 ({targets['protein_g_target']}g) 的 {st['protein_pct']}%（缺口 {p_gap}g）。可增加蛋、奶、鸡胸肉、鱼虾或豆制品。")
             score -= 15
 
     if "carb_pct" in st and st["carb_pct"] > 130:
         issues.append("碳水偏高")
-        suggestions.append("碳水化合物偏高，减少精制主食与含糖饮品，增加粗粮比例。")
+        suggestions.append(f"【碳水偏高】碳水化合物偏高：全天摄入 {t['carb']:.1f}g，达到目标 ({targets['carb_g_target']}g) 的 {st['carb_pct']}%。减少精制主食与含糖饮品，增加粗粮比例。")
         score -= 10
 
     if "fat_pct" in st and st["fat_pct"] > 130:
         issues.append("脂肪偏高")
-        suggestions.append("脂肪摄入偏高，减少油炸、重油烹饪和肥肉，多用蒸煮代替。")
+        suggestions.append(f"【脂肪偏高】脂肪摄入偏高：全天摄入 {t['fat']:.1f}g，达到目标 ({targets['fat_g_target']}g) 的 {st['fat_pct']}%。减少油炸、重油烹饪和肥肉，多用蒸煮代替。")
         score -= 10
 
     # 维度 3：控糖减盐 (20分)
     if t.get("sugar", 0) > 50:
         issues.append("糖摄入偏多")
-        suggestions.append("今日统计总糖偏多（含天然糖分）。若主要来自整果与纯奶可放宽关注，但需重点留意含糖饮料、奶茶与加工甜点中的游离糖。")
+        suggestions.append(f"【添加糖偏多】今日统计总糖偏多：累计摄入 {t['sugar']:.1f}g（参考上限 50.0g）。若主要来自整果与纯奶可放宽关注，但需重点留意含糖饮料、奶茶与加工甜点中的游离糖。")
         score -= 5
 
     if t.get("sodium", 0) > 2000:
         issues.append("钠摄入过多")
-        suggestions.append("钠摄入过高，减少腌制食品、外卖、调味品用量，多喝水。")
+        suggestions.append(f"【钠摄入过多】钠摄入过高：全天钠摄入 {t['sodium']:.0f} mg，超过 2000.0 mg/日健康上限。减少腌制食品、外卖重盐调料，多喝水促进代谢。")
         score -= 10
 
     # 维度 4：膳食纤维 (15分)
     if t.get("fiber", 0) < 15:
         issues.append("膳食纤维不足")
-        suggestions.append("膳食纤维不足，可补充燕麦、豆类、绿叶菜与水果。")
+        f_gap = round(max(0.0, 25.0 - t["fiber"]), 1)
+        suggestions.append(f"【膳食纤维不足】膳食纤维不足：全天仅摄入 {t['fiber']:.1f}g（低于 15.0g 临界线，距 25.0g 目标尚差 {f_gap}g）。可补充燕麦、豆类、绿叶菜与水果。")
         score -= 5
 
     # 维度 5：净热量与运动联动
@@ -223,7 +243,7 @@ def evaluate_day(date_str, targets=None, phase=None):
         suggestions.append(f"今日运动消耗 {t['exercise_cal']:.0f} 千卡，净摄入 {t['net_cal']:.0f} 千卡。")
 
     if not suggestions:
-        suggestions.append("今日饮食结构良好，请继续保持均衡搭配。")
+        suggestions.append(f"今日热量摄入 {t['cal']:.0f} kcal 结构良好，三大营养素配比均衡，请继续保持！")
 
     final_score = max(score, 0)
     grade = "S" if final_score >= 90 else ("A" if final_score >= 80 else ("B" if final_score >= 70 else ("C" if final_score >= 60 else "D")))
@@ -236,6 +256,7 @@ def evaluate_day(date_str, targets=None, phase=None):
         "issues": issues,
         "status": st,
         "telemetry": telemetry,
+        "units": dict(calc.COMMON_UNITS),
         "suggestions": suggestions,
     }
 

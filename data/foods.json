@@ -159,6 +159,15 @@
     {"name": "乌龙茶", "aliases": ["无糖乌龙茶", "茶", "绿茶", "红茶", "茶水", "普洱茶", "无糖茶"], "category": "饮品", "cal": 1, "protein": 0, "carb": 0.2, "fat": 0, "fiber": 0, "sugar": 0, "sodium": 2, "serving": {"杯": 250, "瓶": 500, "ml": 1}},
     {"name": "牛排", "aliases": ["煎牛排", "牛扒", "西冷牛排", "菲力牛排", "肋眼牛排"], "category": "菜肴", "cal": 220, "protein": 24, "carb": 0, "fat": 14, "fiber": 0, "sugar": 0, "sodium": 200, "serving": {"块": 150, "份": 150}},
     {"name": "三明治", "aliases": ["全麦三明治", "鸡肉三明治", "火腿三明治"], "category": "综合/快餐", "cal": 210, "protein": 12.0, "carb": 25.0, "fat": 7.0, "fiber": 2.0, "sugar": 2.5, "sodium": 450, "serving": {"个": 180, "份": 180}},
-    {"name": "米粉", "aliases": ["桂林米粉", "汤米粉", "炒米粉", "米线", "河粉"], "category": "主食", "cal": 110, "protein": 2.0, "carb": 24.0, "fat": 0.5, "fiber": 0.5, "sugar": 0.0, "sodium": 200, "serving": {"碗": 300, "份": 300}}
+    {"name": "米粉", "aliases": ["桂林米粉", "汤米粉", "炒米粉", "米线", "河粉"], "category": "主食", "cal": 110, "protein": 2.0, "carb": 24.0, "fat": 0.5, "fiber": 0.5, "sugar": 0.0, "sodium": 200, "serving": {"碗": 300, "份": 300}},
+    {"name": "冬瓜", "category": "蔬菜", "cal": 12, "protein": 0.4, "carb": 2.6, "fat": 0.2, "fiber": 0.7, "sugar": 1.5, "sodium": 2.8, "serving": {"碗": 200, "份": 150, "块": 100, "片": 30}},
+    {"name": "牛肉冬瓜汤", "aliases": ["冬瓜牛肉汤", "冬瓜牛肉煲"], "category": "菜肴", "cal": 42, "protein": 4.5, "carb": 1.2, "fat": 2.0, "fiber": 0.4, "sugar": 0.2, "sodium": 220, "serving": {"碗": 300, "份": 300, "大碗": 450}},
+    {"name": "冬瓜排骨汤", "aliases": ["排骨冬瓜汤", "冬瓜汤"], "category": "菜肴", "cal": 48, "protein": 3.8, "carb": 1.2, "fat": 3.2, "fiber": 0.4, "sugar": 0.2, "sodium": 240, "serving": {"碗": 300, "份": 300, "大碗": 450}},
+    {"name": "南瓜", "aliases": ["蒸南瓜", "贝贝南瓜"], "category": "蔬菜", "cal": 26, "protein": 0.7, "carb": 5.3, "fat": 0.1, "fiber": 0.8, "sugar": 2.8, "sodium": 0.8, "serving": {"块": 100, "碗": 150, "个": 300}},
+    {"name": "丝瓜", "aliases": ["清炒丝瓜"], "category": "蔬菜", "cal": 20, "protein": 1.0, "carb": 4.2, "fat": 0.2, "fiber": 0.6, "sugar": 1.8, "sodium": 2.6, "serving": {"根": 200, "碗": 150}},
+    {"name": "芹菜", "aliases": ["西芹", "香芹"], "category": "蔬菜", "cal": 16, "protein": 0.8, "carb": 3.0, "fat": 0.1, "fiber": 1.4, "sugar": 1.2, "sodium": 159, "serving": {"棵": 100, "根": 50, "碗": 100}},
+    {"name": "莲藕", "aliases": ["藕", "清炒藕片"], "category": "蔬菜", "cal": 73, "protein": 1.9, "carb": 16.4, "fat": 0.2, "fiber": 1.2, "sugar": 1.5, "sodium": 44, "serving": {"节": 200, "片": 20, "碗": 150}},
+    {"name": "山药", "aliases": ["铁棍山药", "淮山"], "category": "蔬菜", "cal": 57, "protein": 1.9, "carb": 12.4, "fat": 0.2, "fiber": 0.8, "sugar": 0.5, "sodium": 18.6, "serving": {"根": 200, "段": 50, "碗": 150}},
+    {"name": "豆芽", "aliases": ["绿豆芽", "黄豆芽", "炒豆芽"], "category": "蔬菜", "cal": 18, "protein": 2.1, "carb": 1.7, "fat": 0.1, "fiber": 1.0, "sugar": 0.5, "sodium": 7.2, "serving": {"碗": 100, "份": 150}}
   ]
 }

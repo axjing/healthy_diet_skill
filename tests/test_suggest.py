@@ -54,7 +54,11 @@ class TestSuggestModule(unittest.TestCase):
             self.assertTrue(any("运动消耗 200 千卡" in s for s in res["suggestions"]))
 
             # 校验高密度量化遥测字段与单位
+            self.assertIn("units", res)
+            self.assertEqual(res["units"]["cal"], "kcal")
             self.assertIn("telemetry", res)
+            self.assertIn("units", res["telemetry"])
+            self.assertEqual(res["telemetry"]["units"]["energy"], "kcal")
             self.assertEqual(res["telemetry"]["energy"]["consumed_cal"], 1100.0)
             self.assertEqual(res["telemetry"]["energy"]["target_cal"], 1767)
             self.assertEqual(res["telemetry"]["energy"]["safety_floor"], 1500)
